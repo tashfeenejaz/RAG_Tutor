@@ -1,0 +1,317 @@
+"""
+Retrieval evaluation + ablation.
+
+Gold set: eval/gold_set.jsonl. Each answerable query lists ``answer_phrases``
+(verbatim text that must appear in a chunk for it to count as relevant), so the
+evaluation does not depend on chunk ids and survives re-chunking. Out-of-scope
+queries (``should_refuse``) are used to measure how often irrelevant chunks are
+returned.
+
+Usage
+-----
+    python eval_retrieval.py                 # all configurations (needs chroma_db)
+    python eval_retrieval.py --bm25-only     # no embedding model / vector DB needed
+    python eval_retrieval.py --k 5 --out eval/results
+
+Extra flags
+-----------
+    --translate   run the same Roman-Urdu -> English rewrite that qa.py uses (needs the
+                  Gemini key; results are cached in eval/results/translations.json)
+    --misses      write eval/results/misses.md: every query the final configuration
+                  missed, what it retrieved instead and where the gold chunk ranks
+
+Metrics (answerable queries): Hit@1, Hit@k (a relevant chunk in the top k), Recall@k
+(relevant chunks found / all chunks in the corpus containing the answer phrase), MRR@k,
+nDCG@k, Precision@k, with a 95% bootstrap CI for Hit@k and MRR. Out-of-scope:
+false-retrieval rate (lower is better).
+"""
+import argparse
+import json
+import math
+import random
+import re
+from collections import defaultdict
+from pathlib import Path
+
+import config
+from hybrid_search import HybridSearcher
+
+
+# ------------------------------------------------------------------ helpers
+def norm(text):
+    return re.sub(r"\s+", " ", text.lower().replace("’", "'")).strip()
+
+
+def load_gold(path=None):
+    path = Path(path or config.GOLD_SET_PATH)
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def is_relevant(chunk_text, answer_phrases):
+    t = norm(chunk_text)
+    return any(norm(p) in t for p in answer_phrases)
+
+
+def reciprocal_rank(flags):
+    for i, rel in enumerate(flags, 1):
+        if rel:
+            return 1.0 / i
+    return 0.0
+
+
+def ndcg_at_k(flags, k):
+    """Binary-relevance nDCG; ideal ranking puts all relevant chunks first."""
+    dcg = sum(1.0 / math.log2(i + 1) for i, rel in enumerate(flags[:k], 1) if rel)
+    n_rel = min(sum(flags), k)
+    idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_rel + 1))
+    return dcg / idcg if idcg else 0.0
+
+
+def bootstrap_ci(values, n_boot=2000, seed=0, alpha=0.05):
+    """95% percentile bootstrap CI of the mean. Returns (low, high)."""
+    values = [float(v) for v in values]
+    if not values:
+        return (float("nan"), float("nan"))
+    rng = random.Random(seed)
+    means = sorted(sum(rng.choices(values, k=len(values))) / len(values) for _ in range(n_boot))
+    return (means[int(alpha / 2 * n_boot)], means[int((1 - alpha / 2) * n_boot) - 1])
+
+
+def relevant_ids(chunks, answer_phrases):
+    """Ids of every chunk in the corpus that contains an answer phrase."""
+    return {c["id"] for c in chunks if is_relevant(c["text"], answer_phrases)}
+
+
+def effective_gate(where_filter):
+    return config.RELAXED_MAX_DISTANCE if where_filter else config.MAX_DISTANCE
+
+
+def metrics(retrieved_ids, gold_ids, k=5):
+    top = retrieved_ids[:k]
+    hits = [c for c in top if c in gold_ids]
+    recall = len(set(hits)) / len(gold_ids) if gold_ids else 0
+    precision = len(hits) / k
+    return recall, precision
+
+# --------------------------------------------------------------- evaluation
+CONFIGS = {
+    "BM25 only": dict(mode="bm25", rerank=False),
+    "Dense only": dict(mode="dense", rerank=False),
+    "Hybrid (old: BM25 gated by dense)": dict(mode="hybrid", rerank=False, gate_bm25=True),
+    "Hybrid (RRF, first version: BM25 solo >= 6)": dict(mode="hybrid", rerank=False, bm25_solo_min_score=6.0),
+    "Hybrid (RRF, current thresholds)": dict(mode="hybrid", rerank=False),
+    "Hybrid (RRF) + reranker (current thresholds)": dict(mode="hybrid", rerank=True,
+                                                        rerank_min_score=config.RERANK_MIN_SCORE),
+}
+FINAL_CONFIG = "Hybrid (RRF) + reranker (current thresholds)"
+
+
+def evaluate(searcher, gold, k=5, queries=None, **search_kwargs):
+    queries = queries or {}
+    answerable = [g for g in gold if not g.get("should_refuse")]
+    refusals = [g for g in gold if g.get("should_refuse")]
+    rows, per_type = [], defaultdict(list)
+
+    for g in answerable:
+        flt = g.get("filter")
+        chunks = searcher.search(
+            queries.get(g["id"], g["query"]), n_results=k, where_filter=flt,
+            max_distance=effective_gate(flt), **search_kwargs
+        )
+        flags = [is_relevant(c["text"], g["answer_phrases"]) for c in chunks]
+        rel = relevant_ids(searcher.all_chunks, g["answer_phrases"])
+        found = {c["id"] for c in chunks} & rel
+        row = {
+            "id": g["id"], "type": g["type"], "query": g["query"],
+            "hit@1": bool(flags and flags[0]),
+            "hit@k": any(flags),
+            "mrr": reciprocal_rank(flags),
+            "ndcg": ndcg_at_k(flags, k),
+            "precision": (sum(flags) / k),
+            "recall": (len(found) / len(rel)) if rel else 0.0,
+            "n_relevant_in_corpus": len(rel),
+            "retrieved": [c["id"] for c in chunks],
+        }
+        rows.append(row)
+        per_type[g["type"]].append(row)
+
+    def mean(rs, key):
+        return sum(float(r[key]) for r in rs) / len(rs) if rs else float("nan")
+
+    false_retrievals, false_ids = 0, []
+    for g in refusals:
+        chunks = searcher.search(
+            queries.get(g["id"], g["query"]), n_results=k, where_filter=g.get("filter"),
+            max_distance=effective_gate(g.get("filter")), **search_kwargs,
+        )
+        false_retrievals += bool(chunks)
+        if chunks:
+            false_ids.append(g["id"])
+
+    summary = {
+        "n_answerable": len(answerable),
+        f"hit@1": mean(rows, "hit@1"),
+        f"hit@{k}": mean(rows, "hit@k"),
+        f"mrr@{k}": mean(rows, "mrr"),
+        f"ndcg@{k}": mean(rows, "ndcg"),
+        f"precision@{k}": mean(rows, "precision"),
+        f"recall@{k}": mean(rows, "recall"),
+        f"hit@{k}_ci": bootstrap_ci([r["hit@k"] for r in rows]),
+        f"mrr@{k}_ci": bootstrap_ci([r["mrr"] for r in rows]),
+        "false_retrieval_count": false_retrievals,
+        "false_retrieval_queries": false_ids,
+        "n_out_of_scope": len(refusals),
+        "false_retrieval_rate": (false_retrievals / len(refusals)) if refusals else float("nan"),
+        "by_type": {t: {f"hit@{k}": mean(rs, "hit@k"), f"mrr@{k}": mean(rs, "mrr"), "n": len(rs)}
+                    for t, rs in per_type.items()},
+    }
+    return summary, rows
+
+
+def markdown_table(results, k):
+    head = (f"| Configuration | Hit@1 | Hit@{k} | Recall@{k} | MRR@{k} (95% CI) | nDCG@{k} | P@{k} | "
+            f"False retrieval (out-of-scope) |\n|---|---|---|---|---|---|---|---|\n")
+    lines = []
+    for name, s in results.items():
+        lo, hi = s[f"mrr@{k}_ci"]
+        lines.append(
+            f"| {name} | {s['hit@1']:.2f} | {s[f'hit@{k}']:.2f} | {s[f'recall@{k}']:.2f} | "
+            f"{s[f'mrr@{k}']:.3f} [{lo:.2f}-{hi:.2f}] | {s[f'ndcg@{k}']:.3f} | {s[f'precision@{k}']:.2f} | "
+            f"{s['false_retrieval_rate']:.2f} ({s['false_retrieval_count']}/{s['n_out_of_scope']}) |"
+        )
+    return head + "\n".join(lines)
+
+
+def translated_queries(gold, cache_path):
+    """{id: English query} for Roman-Urdu queries, via the same rewrite step qa.py uses."""
+    import qa
+
+    cache_path = Path(cache_path)
+    cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+    out = {}
+    for g in gold:
+        if qa.detect_language(g["query"]) != "hinglish":
+            continue
+        if g["query"] not in cache:
+            cache[g["query"]] = qa.rewrite_query(g["query"], None, "hinglish")
+        out[g["id"]] = cache[g["query"]]
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+def classify_miss(rel, rank):
+    """Why a query missed: gold | ranking | gate."""
+    if not rel:
+        return "gold"
+    return "ranking" if rank else "gate"
+
+
+def misses_report(searcher, gold, rows, k, queries, search_kwargs, false_ids=()):
+    """Markdown: counts per miss cause, every missed query, and the out-of-scope queries
+    that still retrieved something."""
+    by_id = {g["id"]: g for g in gold}
+    notes = {
+        "gold": "GOLD PROBLEM: the answer phrase is in no chunk (re-chunking cut it, or the phrase is wrong)",
+        "ranking": "ranking problem: the relevant chunk is in the top-20 but not in the top-{k}",
+        "gate": "gate/retrieval problem: the relevant chunk is not in the top-20 (a gate removed it or "
+                "neither retriever found it)",
+    }
+    blocks, causes = [], defaultdict(list)
+    for r in rows:
+        if r["hit@k"]:
+            continue
+        g = by_id[r["id"]]
+        q = queries.get(g["id"], g["query"])
+        rel = relevant_ids(searcher.all_chunks, g["answer_phrases"])
+        deep = searcher.search(q, n_results=20, where_filter=g.get("filter"),
+                               max_distance=effective_gate(g.get("filter")), **search_kwargs)
+        pos = next((i for i, c in enumerate(deep, 1) if c["id"] in rel), None)
+        cause = classify_miss(rel, pos)
+        causes[cause].append(g["id"])
+        out = [f"## {g['id']} [{g['type']}] {g['query']}"]
+        if q != g["query"]:
+            out.append(f"_translated to:_ {q}")
+        out.append(f"- gold phrase: `{g['answer_phrases'][0][:120]}`")
+        out.append(f"- chunks containing it: {sorted(rel) or 'none'}")
+        out.append(f"- **{notes[cause].format(k=k)}**")
+        if pos:
+            ri = deep[pos - 1]["retrieval"]
+            out.append(f"- gold chunk rank {pos}: rerank_score={ri.get('rerank_score')}, "
+                       f"bm25={ri.get('bm25_score')}, dense_distance={ri.get('dense_distance')}")
+        for i, c in enumerate(deep[:3], 1):
+            m = c["metadata"]
+            out.append(f"  {i}. {c['id']} ch{m.get('chapter')} p{m.get('page')} - "
+                       f"{c['text'][:110].replace(chr(10), ' ')}")
+        blocks.append("\n".join(out))
+
+    n = sum(len(v) for v in causes.values())
+    head = ["# Retrieval misses (final configuration)", "",
+            f"{n} answerable queries missed in the top-{k}: "
+            + ", ".join(f"{c} = {len(causes[c])}" for c in ("gold", "ranking", "gate")), ""]
+    for c in ("gold", "ranking", "gate"):
+        if causes[c]:
+            head.append(f"- {c}: {', '.join(causes[c])}")
+    tail = ["", "# Out-of-scope queries that still retrieved something", ""]
+    for gid in false_ids:
+        g = by_id[gid]
+        res = searcher.search(queries.get(gid, g["query"]), n_results=k, where_filter=g.get("filter"),
+                              max_distance=effective_gate(g.get("filter")), **search_kwargs)
+        top = res[0]
+        ri = top["retrieval"]
+        tail.append(f"- {gid} {g['query']!r} -> {top['id']} (rerank={ri.get('rerank_score')}, "
+                    f"bm25={ri.get('bm25_score')}, dense={ri.get('dense_distance')}): "
+                    f"{top['text'][:100].replace(chr(10), ' ')}")
+    if not false_ids:
+        tail.append("none")
+    return "\n".join(head) + "\n\n" + "\n\n".join(blocks) + "\n" + "\n".join(tail) + "\n"
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--gold", default=str(config.GOLD_SET_PATH))
+    ap.add_argument("--k", type=int, default=5)
+    ap.add_argument("--bm25-only", action="store_true", help="skip dense/hybrid (no vector DB needed)")
+    ap.add_argument("--out", default=str(config.EVAL_RESULTS_DIR))
+    ap.add_argument("--translate", action="store_true", help="apply the Roman-Urdu -> English rewrite first")
+    ap.add_argument("--misses", action="store_true", help="write misses.md for the final configuration")
+    args = ap.parse_args()
+
+    gold = load_gold(args.gold)
+    searcher = HybridSearcher(use_reranker=True)
+
+    out = Path(args.out)
+    queries = translated_queries(gold, out / "translations.json") if args.translate else {}
+    if args.translate:
+        print(f"Translated {len(queries)} Roman-Urdu queries (cached in {out/'translations.json'})")
+
+    names = ["BM25 only"] if args.bm25_only else list(CONFIGS)
+    results, details = {}, {}
+    for name in names:
+        print(f"Running: {name} ...")
+        results[name], details[name] = evaluate(searcher, gold, k=args.k, queries=queries, **CONFIGS[name])
+
+    table = markdown_table(results, args.k)
+    print("\n" + table)
+    for name, s in results.items():
+        print(f"\n{name} - by query type:")
+        for t, v in s["by_type"].items():
+            print(f"  {t:12s} n={v['n']:2d}  hit@{args.k}={v[f'hit@{args.k}']:.2f}  mrr={v[f'mrr@{args.k}']:.3f}")
+
+    out.mkdir(parents=True, exist_ok=True)
+    if args.misses:
+        final = FINAL_CONFIG if FINAL_CONFIG in details else names[-1]
+        (out / "misses.md").write_text(
+            misses_report(searcher, gold, details[final], args.k, queries, CONFIGS[final],
+                          results[final]["false_retrieval_queries"]), encoding="utf-8")
+        print(f"Saved {out/'misses.md'} ({final})")
+    (out / "ablation.md").write_text(table + "\n", encoding="utf-8")
+    (out / "ablation.json").write_text(
+        json.dumps({"summary": results, "details": details}, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"\nSaved {out/'ablation.md'} and {out/'ablation.json'}")
+
+
+if __name__ == "__main__":
+    main()

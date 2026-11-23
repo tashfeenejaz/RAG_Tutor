@@ -1,0 +1,78 @@
+{"id": "q001", "type": "definition", "query": "What is a unit of measurement?", "answer_phrases": ["known as a unit"], "filter": null, "should_refuse": false}
+{"id": "q002", "type": "definition", "query": "What is the least count of a metre rule?", "answer_phrases": ["known as least count of the metre rule"], "filter": null, "should_refuse": false}
+{"id": "q003", "type": "definition", "query": "What are derived units?", "answer_phrases": ["units which can be expressed in terms of base units are called derived units"], "filter": null, "should_refuse": false}
+{"id": "q004", "type": "definition", "query": "What is the pitch of a screw gauge?", "answer_phrases": ["which is called pitch of the screw gauge"], "filter": null, "should_refuse": false}
+{"id": "q005", "type": "definition", "query": "What is the point where the coordinate axes meet called?", "answer_phrases": ["known as origin"], "filter": null, "should_refuse": false}
+{"id": "q006", "type": "definition", "query": "Define acceleration.", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
+{"id": "q007", "type": "definition", "query": "Define displacement.", "answer_phrases": ["shortest distance between the initial and final positions of a body is called its displacement"], "filter": null, "should_refuse": false}
+{"id": "q008", "type": "definition", "query": "Define velocity.", "answer_phrases": ["Time rate of displacement of a body is called its velocity"], "filter": null, "should_refuse": false}
+{"id": "q009", "type": "definition", "query": "What does the gradient of a distance-time graph measure?", "answer_phrases": ["gradient is the measure of slope of a line"], "filter": null, "should_refuse": false}
+{"id": "q010", "type": "definition", "query": "What is the action force in Newton's third law?", "answer_phrases": ["the force is known as action of A on B"], "filter": null, "should_refuse": false}
+{"id": "q011", "type": "definition", "query": "What is gravitational field strength?", "answer_phrases": ["defined as the gravitational force acting on unit mass"], "filter": null, "should_refuse": false}
+{"id": "q012", "type": "definition", "query": "Define momentum.", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
+{"id": "q013", "type": "definition", "query": "What is an isolated system?", "answer_phrases": ["known as isolated system"], "filter": null, "should_refuse": false}
+{"id": "q014", "type": "definition", "query": "What is friction?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
+{"id": "q015", "type": "definition", "query": "What is static friction?", "answer_phrases": ["resisting force between the two surfaces before the motion starts is called the static friction"], "filter": null, "should_refuse": false}
+{"id": "q016", "type": "definition", "query": "What is rolling friction?", "answer_phrases": ["which is called rolling friction"], "filter": null, "should_refuse": false}
+{"id": "q017", "type": "definition", "query": "What is a rigid body?", "answer_phrases": ["it is called a rigid body"], "filter": null, "should_refuse": false}
+{"id": "q018", "type": "definition", "query": "What is the axis of rotation?", "answer_phrases": ["is called the axis of rotation"], "filter": null, "should_refuse": false}
+{"id": "q019", "type": "definition", "query": "Define torque or moment of a force.", "answer_phrases": ["defined as the product of the force and the moment arm"], "filter": null, "should_refuse": false}
+{"id": "q020", "type": "definition", "query": "What is resolution of a force?", "answer_phrases": ["known as resolution of a force"], "filter": null, "should_refuse": false}
+{"id": "q021", "type": "definition", "query": "What is centripetal force?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
+{"id": "q022", "type": "definition", "query": "What is the moment arm of a force?", "answer_phrases": ["known as moment arm of the force"], "filter": null, "should_refuse": false}
+{"id": "q023", "type": "definition", "query": "What is nuclear energy?", "answer_phrases": ["known as nuclear energy", "Nuclear energy is the hidden energy"], "filter": null, "should_refuse": false}
+{"id": "q024", "type": "definition", "query": "What is hydroelectric generation?", "answer_phrases": ["electricity generated from the power of falling water"], "filter": null, "should_refuse": false}
+{"id": "q025", "type": "definition", "query": "What is one watt?", "answer_phrases": ["One watt is the work done at the rate of one joule per second"], "filter": null, "should_refuse": false}
+{"id": "q026", "type": "definition", "query": "Define energy.", "answer_phrases": ["Energy is the ability of a body to do work"], "filter": null, "should_refuse": false}
+{"id": "q027", "type": "definition", "query": "What is geothermal energy?", "answer_phrases": ["Geothermal energy is the heat energy of the hot rocks"], "filter": null, "should_refuse": false}
+{"id": "q028", "type": "definition", "query": "Define efficiency of a working system.", "answer_phrases": ["ratio of useful output energy to the total input energy"], "filter": null, "should_refuse": false}
+{"id": "q029", "type": "definition", "query": "What is a deforming force?", "answer_phrases": ["known as deforming force"], "filter": null, "should_refuse": false}
+{"id": "q030", "type": "definition", "query": "What is elasticity?", "answer_phrases": ["known as elasticity"], "filter": null, "should_refuse": false}
+{"id": "q031", "type": "definition", "query": "Define pressure.", "answer_phrases": ["force exerted normally on unit area"], "filter": null, "should_refuse": false}
+{"id": "q032", "type": "definition", "query": "What is plasma?", "answer_phrases": ["plasma is the conducting state of matter"], "filter": null, "should_refuse": false}
+{"id": "q033", "type": "definition", "query": "What is absolute zero?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
+{"id": "q034", "type": "definition", "query": "What is internal energy?", "answer_phrases": ["sum of kinetic and potential energy of the total molecules"], "filter": null, "should_refuse": false}
+{"id": "q035", "type": "definition", "query": "Define heat.", "answer_phrases": ["transferred from one body to the other due to the difference in temperature"], "filter": null, "should_refuse": false}
+{"id": "q036", "type": "definition", "query": "What is a magnetic field?", "answer_phrases": ["region around a magnet where"], "filter": null, "should_refuse": false}
+{"id": "q037", "type": "definition", "query": "What is a magnetic domain?", "answer_phrases": ["magnetic domain"], "filter": null, "should_refuse": false}
+{"id": "q038", "type": "definition", "query": "What is nuclear physics?", "answer_phrases": ["study of the properties of nuclei of the atoms"], "filter": null, "should_refuse": false}
+{"id": "q039", "type": "definition", "query": "What is particle physics?", "answer_phrases": ["study of subatomic particles and elementary particles"], "filter": null, "should_refuse": false}
+{"id": "q040", "type": "definition", "query": "What is a scientific law?", "answer_phrases": ["tested many times and generally accepted as true, it is called a law"], "filter": null, "should_refuse": false}
+{"id": "q041", "type": "definition", "query": "What is solid state physics?", "answer_phrases": ["specific properties of matter in solid form"], "filter": null, "should_refuse": false}
+{"id": "q042", "type": "definition", "query": "How are the fixed points of a temperature scale defined?", "answer_phrases": ["melting point of pure ice or simply ice point"], "filter": null, "should_refuse": false}
+{"id": "q043", "type": "definition", "query": "How does atmospheric pressure change with altitude?", "answer_phrases": ["The lower the atmospheric pressure, the greater is the altitude"], "filter": null, "should_refuse": false}
+{"id": "q044", "type": "paraphrase", "query": "Which quantity tells how quickly the velocity of a body is changing?", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
+{"id": "q045", "type": "paraphrase", "query": "Why do two surfaces resist sliding over each other?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
+{"id": "q046", "type": "paraphrase", "query": "Which force keeps a body moving along a circular path at constant speed?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
+{"id": "q047", "type": "paraphrase", "query": "What is the coldest temperature that can exist in the universe?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
+{"id": "q048", "type": "paraphrase", "query": "Which energy is stored inside the nucleus of an atom?", "answer_phrases": ["known as nuclear energy", "Nuclear energy is the hidden energy"], "filter": null, "should_refuse": false}
+{"id": "q049", "type": "paraphrase", "query": "What do you get by multiplying the mass of a moving body with its velocity?", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
+{"id": "q050", "type": "hinglish", "query": "Torque kya hota hai?", "answer_phrases": ["defined as the product of the force and the moment arm"], "filter": null, "should_refuse": false}
+{"id": "q051", "type": "hinglish", "query": "Acceleration ki definition batao", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
+{"id": "q052", "type": "hinglish", "query": "Friction kya hai?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
+{"id": "q053", "type": "hinglish", "query": "Atmospheric pressure altitude ke saath kaise change hota hai?", "answer_phrases": ["The lower the atmospheric pressure, the greater is the altitude"], "filter": null, "should_refuse": false}
+{"id": "q054", "type": "hinglish", "query": "Centripetal force kise kehte hain?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
+{"id": "q055", "type": "hinglish", "query": "Momentum ki definition kya hai?", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
+{"id": "q056", "type": "hinglish", "query": "Absolute zero kya hota hai?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
+{"id": "q057", "type": "hinglish", "query": "Energy ki definition samjhao", "answer_phrases": ["Energy is the ability of a body to do work"], "filter": null, "should_refuse": false}
+{"id": "q058", "type": "hinglish", "query": "Magnetic field kya hai?", "answer_phrases": ["region around a magnet where"], "filter": null, "should_refuse": false}
+{"id": "q059", "type": "hinglish", "query": "Efficiency kya hoti hai?", "answer_phrases": ["ratio of useful output energy to the total input energy"], "filter": null, "should_refuse": false}
+{"id": "q060", "type": "past_paper", "query": "Einstein's mass-energy equation question", "answer_phrases": ["Einstein's mass-energy equation"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
+{"id": "q061", "type": "past_paper", "query": "latent heat of fusion short question", "answer_phrases": ["latent heat of fusion"], "filter": {"source_type": "past_paper", "question_type": "short"}, "should_refuse": false}
+{"id": "q062", "type": "past_paper", "query": "rate of doing work is called MCQ", "answer_phrases": ["Rate of doing work is called"], "filter": {"question_type": "MCQ"}, "should_refuse": false}
+{"id": "q063", "type": "past_paper", "query": "banking of road question", "answer_phrases": ["banking of road"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
+{"id": "q064", "type": "past_paper", "query": "difference between like and unlike parallel forces", "answer_phrases": ["like and unlike parallel forces"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
+{"id": "q065", "type": "past_paper", "query": "define geostationary orbit", "answer_phrases": ["geostationary orbit"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
+{"id": "q066", "type": "past_paper", "query": "disadvantages of friction", "answer_phrases": ["disadvantages of friction"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
+{"id": "o001", "type": "out_of_scope", "query": "What is the theory of general relativity?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o002", "type": "out_of_scope", "query": "Explain black holes", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o003", "type": "out_of_scope", "query": "What is the periodic table?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o004", "type": "out_of_scope", "query": "What is dark matter?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o005", "type": "out_of_scope", "query": "Who won the Nobel Prize for Physics from Pakistan and for what?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o006", "type": "out_of_scope", "query": "How do I bake a cake?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o007", "type": "out_of_scope", "query": "Who is the prime minister of Pakistan?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o008", "type": "out_of_scope", "query": "What is photosynthesis?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o009", "type": "out_of_scope", "query": "What is the capital of France?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o010", "type": "out_of_scope", "query": "Write a Python program to sort a list", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o011", "type": "out_of_scope", "query": "What is the chemical formula of sulfuric acid?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "o012", "type": "out_of_scope", "query": "Explain the French Revolution", "answer_phrases": [], "filter": null, "should_refuse": true}

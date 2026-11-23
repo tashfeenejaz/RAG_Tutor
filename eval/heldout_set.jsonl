@@ -1,0 +1,42 @@
+{"id": "h001", "type": "definition", "query": "What is translatory motion?", "answer_phrases": ["it is called translatory motion"], "filter": null, "should_refuse": false}
+{"id": "h002", "type": "definition", "query": "What is circular motion?", "answer_phrases": ["The motion of a body along a circle is called circular motion"], "filter": null, "should_refuse": false}
+{"id": "h003", "type": "definition", "query": "What is rotatory motion?", "answer_phrases": ["the motion of this body is called rotatory motion"], "filter": null, "should_refuse": false}
+{"id": "h004", "type": "definition", "query": "What is vibratory motion?", "answer_phrases": ["the motion is called vibratory motion"], "filter": null, "should_refuse": false}
+{"id": "h005", "type": "definition", "query": "Define speed.", "answer_phrases": ["Distance covered by a body in a unit time is called its speed"], "filter": null, "should_refuse": false}
+{"id": "h006", "type": "definition", "query": "What is instantaneous speed?", "answer_phrases": ["is called instantaneous speed"], "filter": null, "should_refuse": false}
+{"id": "h007", "type": "definition", "query": "What is a distance-time graph?", "answer_phrases": ["is called a distance-time graph"], "filter": null, "should_refuse": false}
+{"id": "h008", "type": "definition", "query": "What is muzzle velocity?", "answer_phrases": ["is called the muzzle velocity of the gun"], "filter": null, "should_refuse": false}
+{"id": "h009", "type": "definition", "query": "Define inertia.", "answer_phrases": ["to maintain its state of rest or of uniform motion in a straight line is called inertia"], "filter": null, "should_refuse": false}
+{"id": "h010", "type": "definition", "query": "What is terminal velocity?", "answer_phrases": ["is called its terminal velocity"], "filter": null, "should_refuse": false}
+{"id": "h011", "type": "definition", "query": "What is limiting friction?", "answer_phrases": ["The maximum value of the static friction is called limiting friction"], "filter": null, "should_refuse": false}
+{"id": "h012", "type": "definition", "query": "What is impulse of a force?", "answer_phrases": ["is called as Impulse of the force"], "filter": null, "should_refuse": false}
+{"id": "h013", "type": "definition", "query": "What are parallel forces?", "answer_phrases": ["are known as parallel forces"], "filter": null, "should_refuse": false}
+{"id": "h014", "type": "definition", "query": "What is the line of action of a force?", "answer_phrases": ["The line along which the force acts is called the line of action of the force"], "filter": null, "should_refuse": false}
+{"id": "h015", "type": "definition", "query": "Define potential energy.", "answer_phrases": ["the energy that a body possesses by virtue of its position or deformation"], "filter": null, "should_refuse": false}
+{"id": "h016", "type": "definition", "query": "What is the efficiency of a working system?", "answer_phrases": ["is called the efficiency of a working system"], "filter": null, "should_refuse": false}
+{"id": "h017", "type": "definition", "query": "Define density.", "answer_phrases": ["Density of a substance is defined as its mass per unit volume"], "filter": null, "should_refuse": false}
+{"id": "h018", "type": "definition", "query": "What are barometers?", "answer_phrases": ["are called barometers"], "filter": null, "should_refuse": false}
+{"id": "h019", "type": "definition", "query": "What is plasma called?", "answer_phrases": ["known as fourth state of matter"], "filter": null, "should_refuse": false}
+{"id": "h020", "type": "paraphrase", "query": "Which instrument measures atmospheric pressure?", "answer_phrases": ["Instruments which measure the atmospheric pressure are called barometers"], "filter": null, "should_refuse": false}
+{"id": "h021", "type": "paraphrase", "query": "What name is given to the ratio of useful output energy to the total input energy?", "answer_phrases": ["is called the efficiency of a working system"], "filter": null, "should_refuse": false}
+{"id": "h022", "type": "paraphrase", "query": "What is the name of the energy released by breaking the nucleus of an atom?", "answer_phrases": ["is known as nuclear energy"], "filter": null, "should_refuse": false}
+{"id": "h023", "type": "paraphrase", "query": "How is the instantaneous speed of a vehicle shown?", "answer_phrases": ["shown by its speedometer at any instant"], "filter": null, "should_refuse": false}
+{"id": "h024", "type": "paraphrase", "query": "A body that does not change its position with respect to its surroundings is in which state?", "answer_phrases": ["it is said to be at rest"], "filter": null, "should_refuse": false}
+{"id": "h025", "type": "paraphrase", "query": "What is the SI unit of pressure called?", "answer_phrases": ["is called pascal (Pa)"], "filter": null, "should_refuse": false}
+{"id": "h026", "type": "hinglish", "query": "Resultant force kya hota hai?", "answer_phrases": ["is known as resultant force"], "filter": null, "should_refuse": false}
+{"id": "h027", "type": "hinglish", "query": "Elastic potential energy kya hai?", "answer_phrases": ["is known as elastic potential energy"], "filter": null, "should_refuse": false}
+{"id": "h028", "type": "hinglish", "query": "Nuclear energy kise kehte hain?", "answer_phrases": ["energy released by breaking the nucleus of an atom is known as nuclear energy"], "filter": null, "should_refuse": false}
+{"id": "h029", "type": "hinglish", "query": "Internal energy kya hoti hai?", "answer_phrases": ["is called its internal energy"], "filter": null, "should_refuse": false}
+{"id": "h030", "type": "hinglish", "query": "Ferromagnetic materials kya hote hain?", "answer_phrases": ["are called ferromagnetic materials"], "filter": null, "should_refuse": false}
+{"id": "h031", "type": "definition", "query": "What is a non-contact force?", "answer_phrases": ["is defined as the force between two objects which are not in physical contact"], "filter": null, "should_refuse": false}
+{"id": "h032", "type": "definition", "query": "What are renewable energy sources?", "answer_phrases": ["are called renewable energy source"], "filter": null, "should_refuse": false}
+{"id": "h033", "type": "definition", "query": "What is gravitational potential energy?", "answer_phrases": ["is known as gravitational potential energy"], "filter": null, "should_refuse": false}
+{"id": "h034", "type": "definition", "query": "What are magnetic materials?", "answer_phrases": ["are called magnetic materials"], "filter": null, "should_refuse": false}
+{"id": "ho01", "type": "out_of_scope", "query": "How do vaccines work?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho02", "type": "out_of_scope", "query": "Who wrote the play Hamlet?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho03", "type": "out_of_scope", "query": "What is the function of mitochondria?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho04", "type": "out_of_scope", "query": "Give me a recipe for biryani", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho05", "type": "out_of_scope", "query": "What is GDP?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho06", "type": "out_of_scope", "query": "Who built the Badshahi Mosque?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho07", "type": "out_of_scope", "query": "What is Schrodinger's equation?", "answer_phrases": [], "filter": null, "should_refuse": true}
+{"id": "ho08", "type": "out_of_scope", "query": "Explain the working of a transistor", "answer_phrases": [], "filter": null, "should_refuse": true}

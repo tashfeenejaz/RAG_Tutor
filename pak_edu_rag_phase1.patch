@@ -1,0 +1,2304 @@
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/.env.example b/.env.example
+--- a/.env.example	1970-01-01 05:00:00.000000000 +0500
++++ b/.env.example	2026-11-17 13:23:44.944223324 +0500
+@@ -0,0 +1,7 @@
++# Copy this file to .env and fill in your own key. NEVER commit .env.
++GEMINI_API_KEY=your-gemini-api-key-here
++
++# Optional overrides
++# GEMINI_MODEL=gemini-3.5-flash-lite
++# USE_RERANKER=1
++# RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/.gitignore b/.gitignore
+--- a/.gitignore	1970-01-01 05:00:00.000000000 +0500
++++ b/.gitignore	2026-11-17 13:23:44.945403466 +0500
+@@ -0,0 +1,25 @@
++# secrets
++.env
++*.key
++
++# environments / caches
++venv/
++.venv/
++__pycache__/
++*.pyc
++.pytest_cache/
++
++# generated artefacts (rebuild with: python build_vectordb.py)
++chroma_db/
++eval/results/
++
++# source PDFs and page images (large, and copyrighted)
++*.pdf
++*.png
++*.jpg
++
++# --- DATA / COPYRIGHT -------------------------------------------------
++# The OCR text and chunks come from Punjab Textbook Board books and Lahore
++# Board past papers. Before making the repo public, decide whether you are
++# allowed to publish them. To keep them out of git, uncomment:
++# data/
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/README.md b/README.md
+--- a/README.md	1970-01-01 05:00:00.000000000 +0500
++++ b/README.md	2026-11-17 13:29:02.610573826 +0500
+@@ -0,0 +1,126 @@
++# Pak Edu RAG - Class 9 Physics tutor (Lahore Board)
++
++A retrieval-augmented study assistant for the Punjab Textbook Board Class 9 Physics
++book and Lahore Board past papers (2023-2024). Students ask in English or
++Roman Urdu/Hinglish; answers are grounded in retrieved textbook / past-paper text
++and every answer lists the sources it used.
++
++## How it works
++
++```mermaid
++flowchart LR
++    subgraph Offline["Offline pipeline"]
++        A[Scanned PDFs] -->|Gemini vision OCR<br/>pdf_to_text.py| B[page .txt files]
++        B -->|chunk_and_tag.py<br/>chunk_past_papers.py| C[chunks.jsonl<br/>+ chapter / page / year / question type]
++        C -->|build_vectordb.py<br/>BGE-small embeddings| D[(ChromaDB)]
++        C --> E[BM25 index]
++    end
++    subgraph Online["Online (app.py -> qa.py)"]
++        Q[Student question] --> L{language?}
++        L -->|rewrite / translate to English| R[standalone query]
++        R --> F[filters: chapter, source, question type]
++        F --> DS[dense search]
++        F --> BS[BM25 search]
++        D --> DS
++        E --> BS
++        DS --> RRF[Reciprocal Rank Fusion]
++        BS --> RRF
++        RRF --> X[cross-encoder re-rank]
++        X --> G[Gemini answer<br/>with [Source n] citations]
++        G --> U[Gradio chat + sources list]
++    end
++```
++
++* **Hybrid retrieval** - dense (`BAAI/bge-small-en-v1.5` in ChromaDB) and sparse (BM25)
++  are two independent retrievers fused with RRF, then re-ranked by a small cross-encoder
++  (`Xenova/ms-marco-MiniLM-L-6-v2`, optional and fail-soft).
++* **Relevance gates** - a dense distance threshold and a BM25 minimum score keep
++  out-of-scope questions from retrieving anything, so the tutor can refuse honestly.
++* **Metadata filters** - chapter, source type (textbook / past paper) and question type
++  (MCQ / short / long), set from dropdowns or detected in the question text.
++* **Query rewriting** - follow-ups ("explain them too") become standalone questions and
++  Roman-Urdu questions are translated to English before retrieval.
++* **Grounded answers** - the prompt requires `[Source n]` citations; MCQ answers must say
++  whether they come from the sources or were solved by the tutor (past papers have no answer key).
++
++## Setup
++
++```bash
++python -m venv venv && source venv/bin/activate
++pip install -r requirements.txt
++cp .env.example .env            # then put your own GEMINI_API_KEY in .env
++```
++
++The OCR step (`pdf_to_text.py`) additionally needs poppler (`sudo apt install poppler-utils`).
++
++### Build and run
++
++```bash
++# 1. textbook chunks (re-run after changing the chunker or the OCR text)
++python chunk_and_tag.py          # -> data/.../textbook_chunks.jsonl
++
++# 2. past-paper chunks (chunk_past_papers.py does NOT add chapters; the next two steps do, via Gemini)
++python chunk_past_papers.py      # -> data/.../past_paper_chunks.jsonl
++python tag_chapters_pastpapers.py
++python fix_none_chapters.py      # retries any chunk that still has chapter=None
++
++# 3. embeddings (safe to re-run; rebuilds the collection)
++python build_vectordb.py         # -> ./chroma_db
++
++python app.py                    # Gradio UI at http://127.0.0.1:7860
++```
++
++## Evaluation
++
++```bash
++python eval_retrieval.py --bm25-only   # no vector DB / model download needed
++python eval_retrieval.py               # full ablation -> eval/results/ablation.md
++python eval_generation.py --limit 20   # LLM-judge faithfulness + refusal (uses API quota)
++pytest                                 # offline unit tests (no API key, no model download)
++RUN_LLM_TESTS=1 pytest -m llm          # live grounding tests
++```
++
++`eval/gold_set.jsonl` holds 66 answerable queries (43 definitions, 6 paraphrases,
++10 Roman-Urdu, 7 past-paper lookups) and 12 out-of-scope queries. A chunk counts as relevant
++when it contains the query's verbatim `answer_phrases`, so the evaluation survives
++re-chunking. Metrics: Hit@1, Hit@5, MRR@5, nDCG@5, Precision@5, and the false-retrieval
++rate on out-of-scope queries.
++
++### Results
++
++Paste the output of `python eval_retrieval.py` here (it is written to `eval/results/ablation.md`):
++
++| Configuration | Hit@1 | Hit@5 | MRR@5 | nDCG@5 | P@5 | False retrieval (out-of-scope) |
++|---|---|---|---|---|---|---|
++| BM25 only | 0.50 | 0.74 | 0.600 | 0.630 | 0.17 | 0.42 |
++| Dense only | _run_ | | | | | |
++| Hybrid (old: BM25 gated by dense) | _run_ | | | | | |
++| Hybrid (RRF) | _run_ | | | | | |
++| Hybrid (RRF) + reranker | _run_ | | | | | |
++
++## Known limitations
++
++* The embedding model is English-only; Roman-Urdu questions rely on the LLM rewrite step.
++* Chunks never cross page boundaries, so a definition split over two pages is split in two.
++* MCQ answers that are not in the sources are solved by the LLM (and labelled as such).
++* The gold set was written from the OCR text by one author; extend it before drawing strong conclusions.
++
++## Data and copyright
++
++The OCR text and chunks are derived from Punjab Textbook Board books and Lahore Board
++past papers. Check that you may redistribute them before publishing the repository
++(see the commented `data/` line in `.gitignore`).
++
++## Project layout
++
++| File | Purpose |
++|---|---|
++| `config.py` | paths, model names, thresholds, API key loading (`.env`) |
++| `pdf_to_text.py` | PDF pages -> text with Gemini vision |
++| `chunk_and_tag.py`, `chunk_past_papers.py`, `tag_chapters_pastpapers.py`, `fix_none_chapters.py` | chunking + metadata |
++| `build_vectordb.py` | embeddings -> ChromaDB |
++| `hybrid_search.py` | dense + BM25 + RRF + re-ranking |
++| `qa.py` | language detection, query rewriting, prompt, answer / stream |
++| `app.py` | Gradio UI |
++| `eval_retrieval.py`, `eval_generation.py`, `eval/gold_set.jsonl` | evaluation |
++| `tests/` | pytest suite |
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/app.py b/app.py
+--- a/app.py	2026-11-17 13:23:31.043894177 +0500
++++ b/app.py	2026-11-17 13:25:31.091607809 +0500
+@@ -1,5 +1,5 @@
+ import gradio as gr
+-from qa import ask, extract_implicit_filters
++from qa import ask_stream
+ 
+ CHAPTERS = {
+     "All Chapters": None,
+@@ -97,40 +97,12 @@
+     return pairs[-n:]
+ 
+ 
+-def derive_conversation_filter(message, history):
+-    """
+-    Chapter tends to stay the same across a follow-up conversation, so it's
+-    carried over from recent messages. Question type is NOT carried over —
+-    it only applies when explicitly mentioned in the CURRENT message, since
+-    a follow-up like "explain them" often needs textbook content (which has
+-    no question_type field at all, so carrying that filter over would wrongly
+-    exclude textbook chunks).
+-    """
+-    all_msgs = get_user_messages_from_history(history) + [message]
+-
+-    result = {}
+-    for msg in reversed(all_msgs):
+-        detected = extract_implicit_filters(msg, current_query=msg) or {}
+-        if "chapter" in detected and "chapter" not in result:
+-            result["chapter"] = detected["chapter"]
+-        if "chapter" in result:
+-            break
+-
+-    # question_type: only from the CURRENT message, never carried over
+-    current_detected = extract_implicit_filters(message, current_query=message) or {}
+-    if "question_type" in current_detected:
+-        result["question_type"] = current_detected["question_type"]
+-
+-    return result if result else None
+-
+-
+-from qa import ask
+-
+ def chat_fn(message, history, chapter_label, source_label, qtype_label):
+     dropdown_filter = build_filter(chapter_label, source_label, qtype_label)
+     where_filter = dropdown_filter if dropdown_filter else None
+ 
+-    qa_pairs = get_last_qa_pairs(history, n=2)
++    # drop the "Sources used" footer so it is not fed back into the prompts
++    qa_pairs = [(u, a.split("\n\n---\n**Sources used**")[0]) for u, a in get_last_qa_pairs(history, n=2)]
+ 
+     instruction_extra = ""
+     if qa_pairs:
+@@ -141,23 +113,21 @@
+         instruction_extra = "CONVERSATION SO FAR (for context):\n" + conv_text
+ 
+     try:
+-        answer, chunks = ask(
++        yield from ask_stream(
+             message,
+             where_filter=where_filter,
+             instruction_extra=instruction_extra,
+             lang_query=message,
+             display_query=message,
+-            qa_pairs=qa_pairs
++            qa_pairs=qa_pairs,
+         )
+     except Exception as e:
+-        return "An error occurred: " + str(e)
+-
+-    return answer
++        yield "An error occurred: " + str(e)
+ 
+ with gr.Blocks(title="Pak Edu RAG — Class 9 Physics") as demo:
+     gr.Markdown("""
+     # 📘 Pak Edu RAG — Class 9 Physics (Lahore Board)
+-    Ask questions in English or Hinglish — answers are grounded strictly in the textbook and past papers, no outside information.
++    Ask questions in English or Hinglish — answers are grounded in the textbook and past papers, with the sources listed under every answer.
+     """)
+ 
+     with gr.Row():
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/build_vectordb.py b/build_vectordb.py
+--- a/build_vectordb.py	2026-11-17 13:23:31.027181801 +0500
++++ b/build_vectordb.py	2026-11-17 13:25:31.093972518 +0500
+@@ -1,69 +1,59 @@
++"""Embed all chunks with BGE-small and store them in ChromaDB (safe to re-run)."""
+ import json
++
+ import chromadb
+-from pathlib import Path
+ from fastembed import TextEmbedding
+ 
++import config
++
+ 
+ def load_jsonl(path):
+     chunks = []
+     with open(path, encoding="utf-8") as f:
+         for line in f:
+-            chunks.append(json.loads(line))
++            if line.strip():
++                chunks.append(json.loads(line))
+     return chunks
+ 
+ 
+ def sanitize_metadata(metadata):
+-    """
+-    ChromaDB doesn't accept None values in metadata (e.g. chapter=None
+-    on the textbook's cover/intro pages). Replace None with a safe default.
+-    """
+-    clean = {}
+-    for k, v in metadata.items():
+-        if v is None:
+-            clean[k] = "unknown"
+-        else:
+-            clean[k] = v
+-    return clean
+-
+-
+-def build_vector_db():
+-    # Load both chunk files
+-    textbook_chunks = load_jsonl("data/class_9/Lahore_board/physics/textbook_chunks.jsonl")
+-    past_paper_chunks = load_jsonl("data/class_9/Lahore_board/physics/past_paper_chunks.jsonl")
+-    all_chunks = textbook_chunks + past_paper_chunks
+-
+-    print(f"Total chunks to embed: {len(all_chunks)}")
++    """ChromaDB rejects None values (e.g. chapter=None on cover pages)."""
++    return {k: ("unknown" if v is None else v) for k, v in metadata.items()}
+ 
+-    # Set up embedding model  — BAAI/bge-small
+-    embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+ 
+-    # Set up persistent ChromaDB client (data survives between runs)
+-    client = chromadb.PersistentClient(path="chroma_db")
+-    collection = client.get_or_create_collection(name="physics_class9")
+-
+-    # Prepare data for insertion
++def build_vector_db(batch_size=100):
++    all_chunks = load_jsonl(config.TEXTBOOK_CHUNKS) + load_jsonl(config.PAST_PAPER_CHUNKS)
+     ids = [c["id"] for c in all_chunks]
++    assert len(ids) == len(set(ids)), "Duplicate chunk ids - re-run the chunking scripts first."
++    print(f"Total chunks to embed: {len(all_chunks)}")
++
++    model = TextEmbedding(model_name=config.EMBED_MODEL)
+     documents = [c["text"] for c in all_chunks]
+     metadatas = [sanitize_metadata(c["metadata"]) for c in all_chunks]
+ 
+     print("Generating embeddings...")
+-    embeddings = list(embedding_model.embed(documents))
+-    embeddings = [e.tolist() for e in embeddings]
++    embeddings = [e.tolist() for e in model.embed(documents)]
++
++    client = chromadb.PersistentClient(path=config.CHROMA_PATH)
++    # Rebuild from scratch so re-running never leaves stale or duplicate rows.
++    try:
++        client.delete_collection(config.COLLECTION_NAME)
++    except Exception:
++        pass
++    collection = client.create_collection(name=config.COLLECTION_NAME)
+ 
+     print("Inserting into ChromaDB...")
+-    # Insert in batches to avoid memory issues (though 474 is small enough for one go)
+-    batch_size = 100
+     for i in range(0, len(ids), batch_size):
+         collection.add(
+-            ids=ids[i:i+batch_size],
+-            documents=documents[i:i+batch_size],
+-            embeddings=embeddings[i:i+batch_size],
+-            metadatas=metadatas[i:i+batch_size]
++            ids=ids[i : i + batch_size],
++            documents=documents[i : i + batch_size],
++            embeddings=embeddings[i : i + batch_size],
++            metadatas=metadatas[i : i + batch_size],
+         )
+-        print(f"  Inserted {min(i+batch_size, len(ids))}/{len(ids)}")
++        print(f"  Inserted {min(i + batch_size, len(ids))}/{len(ids)}")
+ 
+-    print(f"\nDone. Collection now has {collection.count()} items.")
++    print(f"\nDone. Collection '{config.COLLECTION_NAME}' has {collection.count()} items.")
+ 
+ 
+ if __name__ == "__main__":
+-    build_vector_db()
+\ No newline at end of file
++    build_vector_db()
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/chunk_and_tag.py b/chunk_and_tag.py
+--- a/chunk_and_tag.py	2026-11-17 13:23:31.043861009 +0500
++++ b/chunk_and_tag.py	2026-11-17 13:24:37.639880881 +0500
+@@ -57,10 +57,13 @@
+ 
+     chunks = []
+     start = 0
+-    while start < len(words): 
++    while start < len(words):
+         end = start + chunk_size
+-        chunk_words = words[start:end]
+-        chunks.append(" ".join(chunk_words))
++        chunks.append(" ".join(words[start:end]))
++        if end >= len(words):
++            # Stop here: the next window would only repeat the overlap of this
++            # chunk (a redundant "tail" chunk made of already-covered words).
++            break
+         start += (chunk_size - overlap)  # move forward, but overlap a bit
+ 
+     return chunks
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/config.py b/config.py
+--- a/config.py	1970-01-01 05:00:00.000000000 +0500
++++ b/config.py	2026-11-17 13:24:37.621860551 +0500
+@@ -0,0 +1,58 @@
++"""
++Central configuration for Pak_Edu_RAG.
++
++Secrets (the Gemini API key) are read from the environment / a local .env file.
++They must never be written in source code.
++"""
++import os
++from pathlib import Path
++
++try:
++    from dotenv import load_dotenv
++
++    load_dotenv()  # reads a .env file in the working directory, if present
++except ImportError:  # python-dotenv is optional at import time
++    pass
++
++# ---------------------------------------------------------------- paths
++DATA_DIR = Path(os.getenv("PAKEDU_DATA_DIR", "data/class_9/Lahore_board/physics"))
++TEXTBOOK_OCR_DIR = DATA_DIR / "textbook_ocr"
++PAST_PAPERS_OCR_DIR = DATA_DIR / "past_papers_ocr"
++TEXTBOOK_CHUNKS = DATA_DIR / "textbook_chunks.jsonl"
++PAST_PAPER_CHUNKS = DATA_DIR / "past_paper_chunks.jsonl"
++CHROMA_PATH = os.getenv("PAKEDU_CHROMA_PATH", "chroma_db")
++COLLECTION_NAME = "physics_class9"
++GOLD_SET_PATH = Path("eval/gold_set.jsonl")
++EVAL_RESULTS_DIR = Path("eval/results")
++
++# ---------------------------------------------------------------- models
++LLM_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
++EMBED_MODEL = "BAAI/bge-small-en-v1.5"
++RERANK_MODEL = os.getenv("RERANK_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
++USE_RERANKER = os.getenv("USE_RERANKER", "1") not in ("0", "false", "False", "")
++
++# ---------------------------------------------------------------- retrieval
++# Chroma distance here is squared-L2 on normalised BGE vectors (Chroma default),
++# i.e. cosine_distance = distance / 2. Lower is better.
++MAX_DISTANCE = 0.65            # strict gate used for open questions
++RELAXED_MAX_DISTANCE = 0.85    # used when the user filters by question type ("list all MCQs ...")
++BM25_MIN_SCORE = float(os.getenv("BM25_MIN_SCORE", "6.0"))  # BM25-only candidates must reach this score
++CANDIDATES = 20                # candidates taken from each retriever before fusion
++RRF_K = 60
++RERANK_CANDIDATES = 15         # how many fused candidates go to the cross-encoder
++
++
++def get_api_key() -> str:
++    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
++    if not key:
++        raise RuntimeError(
++            "GEMINI_API_KEY is not set. Copy .env.example to .env and put your key there."
++        )
++    return key
++
++
++def get_client():
++    """Create a Gemini client from the environment (imported lazily)."""
++    from google import genai
++
++    return genai.Client(api_key=get_api_key())
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/eval/gold_set.jsonl b/eval/gold_set.jsonl
+--- a/eval/gold_set.jsonl	1970-01-01 05:00:00.000000000 +0500
++++ b/eval/gold_set.jsonl	2026-11-17 13:26:29.218219868 +0500
+@@ -0,0 +1,78 @@
++{"id": "q001", "type": "definition", "query": "What is a unit of measurement?", "answer_phrases": ["known as a unit"], "filter": null, "should_refuse": false}
++{"id": "q002", "type": "definition", "query": "What is the least count of a metre rule?", "answer_phrases": ["known as least count of the metre rule"], "filter": null, "should_refuse": false}
++{"id": "q003", "type": "definition", "query": "What are derived units?", "answer_phrases": ["units which can be expressed in terms of base units are called derived units"], "filter": null, "should_refuse": false}
++{"id": "q004", "type": "definition", "query": "What is the pitch of a screw gauge?", "answer_phrases": ["which is called pitch of the screw gauge"], "filter": null, "should_refuse": false}
++{"id": "q005", "type": "definition", "query": "What is the point where the coordinate axes meet called?", "answer_phrases": ["known as origin"], "filter": null, "should_refuse": false}
++{"id": "q006", "type": "definition", "query": "Define acceleration.", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
++{"id": "q007", "type": "definition", "query": "Define displacement.", "answer_phrases": ["shortest distance between the initial and final positions of a body is called its displacement"], "filter": null, "should_refuse": false}
++{"id": "q008", "type": "definition", "query": "Define velocity.", "answer_phrases": ["Time rate of displacement of a body is called its velocity"], "filter": null, "should_refuse": false}
++{"id": "q009", "type": "definition", "query": "What does the gradient of a distance-time graph measure?", "answer_phrases": ["gradient is the measure of slope of a line"], "filter": null, "should_refuse": false}
++{"id": "q010", "type": "definition", "query": "What is the action force in Newton's third law?", "answer_phrases": ["the force is known as action of A on B"], "filter": null, "should_refuse": false}
++{"id": "q011", "type": "definition", "query": "What is gravitational field strength?", "answer_phrases": ["defined as the gravitational force acting on unit mass"], "filter": null, "should_refuse": false}
++{"id": "q012", "type": "definition", "query": "Define momentum.", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
++{"id": "q013", "type": "definition", "query": "What is an isolated system?", "answer_phrases": ["known as isolated system"], "filter": null, "should_refuse": false}
++{"id": "q014", "type": "definition", "query": "What is friction?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
++{"id": "q015", "type": "definition", "query": "What is static friction?", "answer_phrases": ["resisting force between the two surfaces before the motion starts is called the static friction"], "filter": null, "should_refuse": false}
++{"id": "q016", "type": "definition", "query": "What is rolling friction?", "answer_phrases": ["which is called rolling friction"], "filter": null, "should_refuse": false}
++{"id": "q017", "type": "definition", "query": "What is a rigid body?", "answer_phrases": ["it is called a rigid body"], "filter": null, "should_refuse": false}
++{"id": "q018", "type": "definition", "query": "What is the axis of rotation?", "answer_phrases": ["is called the axis of rotation"], "filter": null, "should_refuse": false}
++{"id": "q019", "type": "definition", "query": "Define torque or moment of a force.", "answer_phrases": ["defined as the product of the force and the moment arm"], "filter": null, "should_refuse": false}
++{"id": "q020", "type": "definition", "query": "What is resolution of a force?", "answer_phrases": ["known as resolution of a force"], "filter": null, "should_refuse": false}
++{"id": "q021", "type": "definition", "query": "What is centripetal force?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
++{"id": "q022", "type": "definition", "query": "What is the moment arm of a force?", "answer_phrases": ["known as moment arm of the force"], "filter": null, "should_refuse": false}
++{"id": "q023", "type": "definition", "query": "What is nuclear energy?", "answer_phrases": ["known as nuclear energy", "Nuclear energy is the hidden energy"], "filter": null, "should_refuse": false}
++{"id": "q024", "type": "definition", "query": "What is hydroelectric generation?", "answer_phrases": ["electricity generated from the power of falling water"], "filter": null, "should_refuse": false}
++{"id": "q025", "type": "definition", "query": "What is one watt?", "answer_phrases": ["One watt is the work done at the rate of one joule per second"], "filter": null, "should_refuse": false}
++{"id": "q026", "type": "definition", "query": "Define energy.", "answer_phrases": ["Energy is the ability of a body to do work"], "filter": null, "should_refuse": false}
++{"id": "q027", "type": "definition", "query": "What is geothermal energy?", "answer_phrases": ["Geothermal energy is the heat energy of the hot rocks"], "filter": null, "should_refuse": false}
++{"id": "q028", "type": "definition", "query": "Define efficiency of a working system.", "answer_phrases": ["ratio of useful output energy to the total input energy"], "filter": null, "should_refuse": false}
++{"id": "q029", "type": "definition", "query": "What is a deforming force?", "answer_phrases": ["known as deforming force"], "filter": null, "should_refuse": false}
++{"id": "q030", "type": "definition", "query": "What is elasticity?", "answer_phrases": ["known as elasticity"], "filter": null, "should_refuse": false}
++{"id": "q031", "type": "definition", "query": "Define pressure.", "answer_phrases": ["force exerted normally on unit area"], "filter": null, "should_refuse": false}
++{"id": "q032", "type": "definition", "query": "What is plasma?", "answer_phrases": ["plasma is the conducting state of matter"], "filter": null, "should_refuse": false}
++{"id": "q033", "type": "definition", "query": "What is absolute zero?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
++{"id": "q034", "type": "definition", "query": "What is internal energy?", "answer_phrases": ["sum of kinetic and potential energy of the total molecules"], "filter": null, "should_refuse": false}
++{"id": "q035", "type": "definition", "query": "Define heat.", "answer_phrases": ["transferred from one body to the other due to the difference in temperature"], "filter": null, "should_refuse": false}
++{"id": "q036", "type": "definition", "query": "What is a magnetic field?", "answer_phrases": ["region around a magnet where"], "filter": null, "should_refuse": false}
++{"id": "q037", "type": "definition", "query": "What is a magnetic domain?", "answer_phrases": ["magnetic domain"], "filter": null, "should_refuse": false}
++{"id": "q038", "type": "definition", "query": "What is nuclear physics?", "answer_phrases": ["study of the properties of nuclei of the atoms"], "filter": null, "should_refuse": false}
++{"id": "q039", "type": "definition", "query": "What is particle physics?", "answer_phrases": ["study of subatomic particles and elementary particles"], "filter": null, "should_refuse": false}
++{"id": "q040", "type": "definition", "query": "What is a scientific law?", "answer_phrases": ["tested many times and generally accepted as true, it is called a law"], "filter": null, "should_refuse": false}
++{"id": "q041", "type": "definition", "query": "What is solid state physics?", "answer_phrases": ["specific properties of matter in solid form"], "filter": null, "should_refuse": false}
++{"id": "q042", "type": "definition", "query": "How are the fixed points of a temperature scale defined?", "answer_phrases": ["melting point of pure ice or simply ice point"], "filter": null, "should_refuse": false}
++{"id": "q043", "type": "definition", "query": "How does atmospheric pressure change with altitude?", "answer_phrases": ["The lower the atmospheric pressure, the greater is the altitude"], "filter": null, "should_refuse": false}
++{"id": "q044", "type": "paraphrase", "query": "Which quantity tells how quickly the velocity of a body is changing?", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
++{"id": "q045", "type": "paraphrase", "query": "Why do two surfaces resist sliding over each other?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
++{"id": "q046", "type": "paraphrase", "query": "Which force keeps a body moving along a circular path at constant speed?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
++{"id": "q047", "type": "paraphrase", "query": "What is the coldest temperature that can exist in the universe?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
++{"id": "q048", "type": "paraphrase", "query": "Which energy is stored inside the nucleus of an atom?", "answer_phrases": ["known as nuclear energy", "Nuclear energy is the hidden energy"], "filter": null, "should_refuse": false}
++{"id": "q049", "type": "paraphrase", "query": "What do you get by multiplying the mass of a moving body with its velocity?", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
++{"id": "q050", "type": "hinglish", "query": "Torque kya hota hai?", "answer_phrases": ["defined as the product of the force and the moment arm"], "filter": null, "should_refuse": false}
++{"id": "q051", "type": "hinglish", "query": "Acceleration ki definition batao", "answer_phrases": ["Rate of change of velocity of a body is called its acceleration"], "filter": null, "should_refuse": false}
++{"id": "q052", "type": "hinglish", "query": "Friction kya hai?", "answer_phrases": ["Friction is the force that tends to prevent the bodies from sliding over each other"], "filter": null, "should_refuse": false}
++{"id": "q053", "type": "hinglish", "query": "Atmospheric pressure altitude ke saath kaise change hota hai?", "answer_phrases": ["The lower the atmospheric pressure, the greater is the altitude"], "filter": null, "should_refuse": false}
++{"id": "q054", "type": "hinglish", "query": "Centripetal force kise kehte hain?", "answer_phrases": ["causes an object to move in a circle at constant speed is called the centripetal force"], "filter": null, "should_refuse": false}
++{"id": "q055", "type": "hinglish", "query": "Momentum ki definition kya hai?", "answer_phrases": ["momentum of a moving body is the product of its mass and velocity"], "filter": null, "should_refuse": false}
++{"id": "q056", "type": "hinglish", "query": "Absolute zero kya hota hai?", "answer_phrases": ["lowest possible temperature ever"], "filter": null, "should_refuse": false}
++{"id": "q057", "type": "hinglish", "query": "Energy ki definition samjhao", "answer_phrases": ["Energy is the ability of a body to do work"], "filter": null, "should_refuse": false}
++{"id": "q058", "type": "hinglish", "query": "Magnetic field kya hai?", "answer_phrases": ["region around a magnet where"], "filter": null, "should_refuse": false}
++{"id": "q059", "type": "hinglish", "query": "Efficiency kya hoti hai?", "answer_phrases": ["ratio of useful output energy to the total input energy"], "filter": null, "should_refuse": false}
++{"id": "q060", "type": "past_paper", "query": "Einstein's mass-energy equation question", "answer_phrases": ["Einstein's mass-energy equation"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
++{"id": "q061", "type": "past_paper", "query": "latent heat of fusion short question", "answer_phrases": ["latent heat of fusion"], "filter": {"source_type": "past_paper", "question_type": "short"}, "should_refuse": false}
++{"id": "q062", "type": "past_paper", "query": "rate of doing work is called MCQ", "answer_phrases": ["Rate of doing work is called"], "filter": {"question_type": "MCQ"}, "should_refuse": false}
++{"id": "q063", "type": "past_paper", "query": "banking of road question", "answer_phrases": ["banking of road"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
++{"id": "q064", "type": "past_paper", "query": "difference between like and unlike parallel forces", "answer_phrases": ["like and unlike parallel forces"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
++{"id": "q065", "type": "past_paper", "query": "define geostationary orbit", "answer_phrases": ["geostationary orbit"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
++{"id": "q066", "type": "past_paper", "query": "disadvantages of friction", "answer_phrases": ["disadvantages of friction"], "filter": {"source_type": "past_paper"}, "should_refuse": false}
++{"id": "o001", "type": "out_of_scope", "query": "What is the theory of general relativity?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o002", "type": "out_of_scope", "query": "Explain black holes", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o003", "type": "out_of_scope", "query": "What is the periodic table?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o004", "type": "out_of_scope", "query": "What is dark matter?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o005", "type": "out_of_scope", "query": "Who won the Nobel Prize for Physics from Pakistan and for what?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o006", "type": "out_of_scope", "query": "How do I bake a cake?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o007", "type": "out_of_scope", "query": "Who is the prime minister of Pakistan?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o008", "type": "out_of_scope", "query": "What is photosynthesis?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o009", "type": "out_of_scope", "query": "What is the capital of France?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o010", "type": "out_of_scope", "query": "Write a Python program to sort a list", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o011", "type": "out_of_scope", "query": "What is the chemical formula of sulfuric acid?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "o012", "type": "out_of_scope", "query": "Explain the French Revolution", "answer_phrases": [], "filter": null, "should_refuse": true}
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/eval_generation.py b/eval_generation.py
+--- a/eval_generation.py	1970-01-01 05:00:00.000000000 +0500
++++ b/eval_generation.py	2026-11-17 13:28:17.225978459 +0500
+@@ -0,0 +1,117 @@
++"""
++End-to-end generation evaluation with an LLM judge (uses Gemini API quota).
++
++For answerable gold queries it checks FAITHFULNESS (is every claim supported by
++the retrieved sources?) and ANSWER RELEVANCE; for out-of-scope queries it checks
++whether the tutor correctly REFUSES.
++
++    python eval_generation.py --limit 20 --sleep 4
++
++The judge is the same model family as the generator, so treat the numbers as a
++quick regression signal, not ground truth - spot-check a few by hand.
++"""
++import argparse
++import json
++import re
++import time
++from pathlib import Path
++
++import config
++import qa
++from eval_retrieval import load_gold
++
++JUDGE_PROMPT = """You are a strict grader of a physics tutor's answer.
++
++SOURCES GIVEN TO THE TUTOR:
++{context}
++
++QUESTION: {question}
++
++TUTOR'S ANSWER:
++{answer}
++
++Grade and reply with ONLY a JSON object:
++{{"faithful": true/false,  "answers_question": true/false, "unsupported_claims": ["..."]}}
++- faithful: every factual claim is supported by the sources (MCQ answers explicitly labelled "solved by tutor" are allowed).
++- answers_question: the answer actually addresses the question."""
++
++REFUSAL_PROMPT = """A physics tutor was asked a question that is NOT covered by its textbook.
++
++QUESTION: {question}
++TUTOR'S ANSWER:
++{answer}
++
++Did the tutor decline / say the topic is not covered, WITHOUT inventing an answer from outside knowledge?
++Reply with ONLY a JSON object: {{"refused": true/false}}"""
++
++
++def parse_judge_json(text):
++    """Extract the first JSON object from an LLM reply (tolerates ```json fences)."""
++    match = re.search(r"\{.*\}", text or "", re.DOTALL)
++    if not match:
++        return None
++    try:
++        return json.loads(match.group(0))
++    except json.JSONDecodeError:
++        return None
++
++
++def judge(prompt):
++    return parse_judge_json(qa._generate(prompt, retries=3))
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    ap.add_argument("--limit", type=int, default=20, help="max answerable queries to grade (evenly sampled)")
++    ap.add_argument("--sleep", type=float, default=4.0, help="seconds between API calls (free-tier rate limit)")
++    ap.add_argument("--out", default=str(config.EVAL_RESULTS_DIR))
++    args = ap.parse_args()
++
++    gold = load_gold()
++    answerable = [g for g in gold if not g.get("should_refuse")]
++    step = max(1, len(answerable) // args.limit)
++    answerable = answerable[::step][: args.limit]
++    refusals = [g for g in gold if g.get("should_refuse")]
++
++    faithful = relevant = graded = 0
++    details = []
++    for g in answerable:
++        answer, chunks = qa.ask(g["query"], where_filter=g.get("filter"))
++        time.sleep(args.sleep)
++        verdict = judge(JUDGE_PROMPT.format(context=qa.format_context(chunks), question=g["query"], answer=answer)) if chunks else None
++        time.sleep(args.sleep)
++        if verdict:
++            graded += 1
++            faithful += bool(verdict.get("faithful"))
++            relevant += bool(verdict.get("answers_question"))
++        details.append({"id": g["id"], "query": g["query"], "answer": answer, "verdict": verdict})
++        print(f"{g['id']}: {verdict}")
++
++    refused = 0
++    for g in refusals:
++        answer, chunks = qa.ask(g["query"])
++        time.sleep(args.sleep)
++        if not chunks:
++            ok = True  # rejected at retrieval
++        else:
++            v = judge(REFUSAL_PROMPT.format(question=g["query"], answer=answer)) or {}
++            ok = bool(v.get("refused"))
++            time.sleep(args.sleep)
++        refused += ok
++        details.append({"id": g["id"], "query": g["query"], "answer": answer, "refused": ok})
++        print(f"{g['id']}: refused={ok}")
++
++    summary = {
++        "graded_answerable": graded,
++        "faithfulness": faithful / graded if graded else None,
++        "answer_relevance": relevant / graded if graded else None,
++        "refusal_accuracy": refused / len(refusals) if refusals else None,
++    }
++    print("\n", json.dumps(summary, indent=2))
++    out = Path(args.out)
++    out.mkdir(parents=True, exist_ok=True)
++    (out / "generation.json").write_text(json.dumps({"summary": summary, "details": details}, indent=2, ensure_ascii=False), encoding="utf-8")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/eval_retrieval.py b/eval_retrieval.py
+--- a/eval_retrieval.py	2026-11-17 13:23:31.027195657 +0500
++++ b/eval_retrieval.py	2026-11-17 13:26:54.565076498 +0500
+@@ -1,86 +1,167 @@
++"""
++Retrieval evaluation + ablation.
++
++Gold set: eval/gold_set.jsonl. Each answerable query lists ``answer_phrases``
++(verbatim text that must appear in a chunk for it to count as relevant), so the
++evaluation does not depend on chunk ids and survives re-chunking. Out-of-scope
++queries (``should_refuse``) are used to measure how often irrelevant chunks are
++returned.
++
++Usage
++-----
++    python eval_retrieval.py                 # all configurations (needs chroma_db)
++    python eval_retrieval.py --bm25-only     # no embedding model / vector DB needed
++    python eval_retrieval.py --k 5 --out eval/results
++
++Metrics (answerable queries): Hit@1, Hit@k (a relevant chunk in the top k),
++MRR@k, nDCG@k, Precision@k. Out-of-scope: false-retrieval rate (lower is better).
++"""
++import argparse
+ import json
++import math
++import re
++from collections import defaultdict
++from pathlib import Path
++
++import config
+ from hybrid_search import HybridSearcher
+ 
+ 
+-TEST_QUERIES = [
+-    {"query": "What is the SI unit of force?", "expected_chapter": 3},
+-    {"query": "Define least count of a measuring instrument", "expected_chapter": 1},
+-    {"query": "What is Pascal's law?", "expected_chapter": 6},
+-    {"query": "Explain Newton's third law of motion", "expected_chapter": 3},
+-    {"query": "What is centripetal force?", "expected_chapter": 4},
+-    {"query": "Define kinetic energy", "expected_chapter": 5},
+-    {"query": "What is terminal velocity?", "expected_chapter": 3},
+-    {"query": "Explain the difference between distance and displacement", "expected_chapter": 2},
+-    {"query": "What is specific heat?", "expected_chapter": 7},
+-    {"query": "Define magnetic field", "expected_chapter": 8},
+-    {"query": "What is centre of gravity?", "expected_chapter": 4},
+-    {"query": "State the principle of conservation of momentum", "expected_chapter": 3},
+-    {"query": "What is Hooke's law?", "expected_chapter": 6},
+-    {"query": "Define scalar and vector quantities", "expected_chapter": 2},
+-    {"query": "What is atmospheric pressure?", "expected_chapter": 6},
+-    {"query": "Explain absolute zero temperature", "expected_chapter": 7},
+-    {"query": "What are ferromagnetic materials?", "expected_chapter": 8},
+-    {"query": "Define power and its SI unit", "expected_chapter": 5},
+-    {"query": "What is the scientific method?", "expected_chapter": 9},
+-    {"query": "Explain torque or moment of a force", "expected_chapter": 4},
+-]
+-
+-
+-def evaluate_retrieval(searcher, test_queries, n_results=5):
+-    """
+-    For each test query, checks if the correct chapter appears among
+-    the top-N retrieved chunks (textbook only, to keep it simple).
+-    """
+-    results = []
+-
+-    for item in test_queries:
+-        query = item["query"]
+-        expected_chapter = item["expected_chapter"]
+-
+-        chunks = searcher.hybrid_search(
+-            query, n_results=n_results,
+-            where_filter={"source_type": "textbook"}
++# ------------------------------------------------------------------ helpers
++def norm(text):
++    return re.sub(r"\s+", " ", text.lower().replace("’", "'")).strip()
++
++
++def load_gold(path=None):
++    path = Path(path or config.GOLD_SET_PATH)
++    with open(path, encoding="utf-8") as f:
++        return [json.loads(line) for line in f if line.strip()]
++
++
++def is_relevant(chunk_text, answer_phrases):
++    t = norm(chunk_text)
++    return any(norm(p) in t for p in answer_phrases)
++
++
++def reciprocal_rank(flags):
++    for i, rel in enumerate(flags, 1):
++        if rel:
++            return 1.0 / i
++    return 0.0
++
++
++def ndcg_at_k(flags, k):
++    """Binary-relevance nDCG; ideal ranking puts all relevant chunks first."""
++    dcg = sum(1.0 / math.log2(i + 1) for i, rel in enumerate(flags[:k], 1) if rel)
++    n_rel = min(sum(flags), k)
++    idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_rel + 1))
++    return dcg / idcg if idcg else 0.0
++
++
++def effective_gate(where_filter):
++    return config.RELAXED_MAX_DISTANCE if where_filter else config.MAX_DISTANCE
++
++
++# --------------------------------------------------------------- evaluation
++CONFIGS = {
++    "BM25 only": dict(mode="bm25", rerank=False),
++    "Dense only": dict(mode="dense", rerank=False),
++    "Hybrid (old: BM25 gated by dense)": dict(mode="hybrid", rerank=False, gate_bm25=True),
++    "Hybrid (RRF)": dict(mode="hybrid", rerank=False),
++    "Hybrid (RRF) + reranker": dict(mode="hybrid", rerank=True),
++}
++
++
++def evaluate(searcher, gold, k=5, **search_kwargs):
++    answerable = [g for g in gold if not g.get("should_refuse")]
++    refusals = [g for g in gold if g.get("should_refuse")]
++    rows, per_type = [], defaultdict(list)
++
++    for g in answerable:
++        flt = g.get("filter")
++        chunks = searcher.search(
++            g["query"], n_results=k, where_filter=flt, max_distance=effective_gate(flt), **search_kwargs
++        )
++        flags = [is_relevant(c["text"], g["answer_phrases"]) for c in chunks]
++        row = {
++            "id": g["id"], "type": g["type"], "query": g["query"],
++            "hit@1": bool(flags and flags[0]),
++            "hit@k": any(flags),
++            "mrr": reciprocal_rank(flags),
++            "ndcg": ndcg_at_k(flags, k),
++            "precision": (sum(flags) / k),
++            "retrieved": [c["id"] for c in chunks],
++        }
++        rows.append(row)
++        per_type[g["type"]].append(row)
++
++    def mean(rs, key):
++        return sum(float(r[key]) for r in rs) / len(rs) if rs else float("nan")
++
++    false_retrievals = 0
++    for g in refusals:
++        chunks = searcher.search(
++            g["query"], n_results=k, where_filter=g.get("filter"),
++            max_distance=effective_gate(g.get("filter")), **search_kwargs,
+         )
++        false_retrievals += bool(chunks)
+ 
+-        retrieved_chapters = [c["metadata"].get("chapter") for c in chunks]
+-        hit = expected_chapter in retrieved_chapters
+-        top1_hit = retrieved_chapters[0] == expected_chapter if retrieved_chapters else False
+-
+-        results.append({
+-            "query": query,
+-            "expected_chapter": expected_chapter,
+-            "retrieved_chapters": retrieved_chapters,
+-            "hit_in_top_n": hit,
+-            "hit_at_1": top1_hit
+-        })
+-
+-    return results
+-
+-
+-def summarize(results):
+-    total = len(results)
+-    hits_top_n = sum(1 for r in results if r["hit_in_top_n"])
+-    hits_top_1 = sum(1 for r in results if r["hit_at_1"])
+-
+-    print(f"\n{'='*50}")
+-    print(f"RETRIEVAL EVALUATION SUMMARY")
+-    print(f"{'='*50}")
+-    print(f"Total queries: {total}")
+-    print(f"Correct chapter in top-5 results: {hits_top_n}/{total} ({100*hits_top_n/total:.1f}%)")
+-    print(f"Correct chapter as #1 result:      {hits_top_1}/{total} ({100*hits_top_1/total:.1f}%)")
+-
+-    print(f"\n--- Misses (for review) ---")
+-    for r in results:
+-        if not r["hit_in_top_n"]:
+-            print(f"Query: '{r['query']}'")
+-            print(f"  Expected: Chapter {r['expected_chapter']}, Got: {r['retrieved_chapters']}")
++    summary = {
++        "n_answerable": len(answerable),
++        f"hit@1": mean(rows, "hit@1"),
++        f"hit@{k}": mean(rows, "hit@k"),
++        f"mrr@{k}": mean(rows, "mrr"),
++        f"ndcg@{k}": mean(rows, "ndcg"),
++        f"precision@{k}": mean(rows, "precision"),
++        "false_retrieval_rate": (false_retrievals / len(refusals)) if refusals else float("nan"),
++        "by_type": {t: {f"hit@{k}": mean(rs, "hit@k"), f"mrr@{k}": mean(rs, "mrr"), "n": len(rs)}
++                    for t, rs in per_type.items()},
++    }
++    return summary, rows
++
++
++def markdown_table(results, k):
++    head = f"| Configuration | Hit@1 | Hit@{k} | MRR@{k} | nDCG@{k} | P@{k} | False retrieval (out-of-scope) |\n|---|---|---|---|---|---|---|\n"
++    lines = [
++        f"| {name} | {s['hit@1']:.2f} | {s[f'hit@{k}']:.2f} | {s[f'mrr@{k}']:.3f} | "
++        f"{s[f'ndcg@{k}']:.3f} | {s[f'precision@{k}']:.2f} | {s['false_retrieval_rate']:.2f} |"
++        for name, s in results.items()
++    ]
++    return head + "\n".join(lines)
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    ap.add_argument("--gold", default=str(config.GOLD_SET_PATH))
++    ap.add_argument("--k", type=int, default=5)
++    ap.add_argument("--bm25-only", action="store_true", help="skip dense/hybrid (no vector DB needed)")
++    ap.add_argument("--out", default=str(config.EVAL_RESULTS_DIR))
++    args = ap.parse_args()
++
++    gold = load_gold(args.gold)
++    searcher = HybridSearcher(use_reranker=True)
++
++    names = ["BM25 only"] if args.bm25_only else list(CONFIGS)
++    results, details = {}, {}
++    for name in names:
++        print(f"Running: {name} ...")
++        results[name], details[name] = evaluate(searcher, gold, k=args.k, **CONFIGS[name])
++
++    table = markdown_table(results, args.k)
++    print("\n" + table)
++    for name, s in results.items():
++        print(f"\n{name} - by query type:")
++        for t, v in s["by_type"].items():
++            print(f"  {t:12s} n={v['n']:2d}  hit@{args.k}={v[f'hit@{args.k}']:.2f}  mrr={v[f'mrr@{args.k}']:.3f}")
++
++    out = Path(args.out)
++    out.mkdir(parents=True, exist_ok=True)
++    (out / "ablation.md").write_text(table + "\n", encoding="utf-8")
++    (out / "ablation.json").write_text(
++        json.dumps({"summary": results, "details": details}, indent=2, ensure_ascii=False), encoding="utf-8"
++    )
++    print(f"\nSaved {out/'ablation.md'} and {out/'ablation.json'}")
+ 
+ 
+ if __name__ == "__main__":
+-    searcher = HybridSearcher()
+-    results = evaluate_retrieval(searcher, TEST_QUERIES)
+-    summarize(results)
+-
+-    with open("eval_results.json", "w", encoding="utf-8") as f:
+-        json.dump(results, f, indent=2, ensure_ascii=False)
+-    print("\nDetailed results saved to eval_results.json")
+\ No newline at end of file
++    main()
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/fix_none_chapters.py b/fix_none_chapters.py
+--- a/fix_none_chapters.py	1970-01-01 05:00:00.000000000 +0500
++++ b/fix_none_chapters.py	2026-11-17 13:24:37.661518200 +0500
+@@ -0,0 +1,70 @@
++import json
++import time
++from config import get_client, LLM_MODEL
++
++client = get_client()
++MODEL = LLM_MODEL
++
++CHAPTER_LIST = """
++1. Physical Quantities and Measurements
++2. Kinematics
++3. Dynamics
++4. Turning Effects of Force
++5. Work, Energy and Power
++6. Mechanical Properties of Matter
++7. Thermal Properties of Matter
++8. Magnetism
++9. Nature of Science
++"""
++
++
++def classify_chapter(question_text, max_retries=5):
++    prompt = f"""Here is the list of Class 9 Physics chapters:
++{CHAPTER_LIST}
++
++Question: "{question_text}"
++
++Which chapter number (1-9) does this question belong to? Reply with ONLY the number, nothing else."""
++
++    for attempt in range(max_retries):
++        try:
++            response = client.models.generate_content(model=MODEL, contents=prompt)
++            text = response.text.strip()
++            digits = ''.join(c for c in text if c.isdigit())
++            if digits:
++                chapter_num = int(digits)
++                if 1 <= chapter_num <= 9:
++                    return chapter_num
++        except Exception as e:
++            wait = 15  # wait long enough to clear the per-minute quota window
++            print(f"    Error: {e}. Waiting {wait}s before retry...")
++            time.sleep(wait)
++
++    return None
++
++
++def fix_none_chapters(path):
++    chunks = []
++    with open(path, encoding="utf-8") as f:
++        for line in f:
++            chunks.append(json.loads(line))
++
++    none_chunks = [c for c in chunks if c["metadata"].get("chapter") is None]
++    print(f"Found {len(none_chunks)} chunks needing reclassification.\n")
++
++    for i, chunk in enumerate(none_chunks):
++        print(f"[{i+1}/{len(none_chunks)}] {chunk['id']}...")
++        chapter = classify_chapter(chunk["text"])
++        chunk["metadata"]["chapter"] = chapter
++        print(f"    -> Chapter {chapter}")
++        time.sleep(4)  # stay comfortably under 15 requests/minute
++
++    with open(path, "w", encoding="utf-8") as f:
++        for chunk in chunks:
++            f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
++
++    print(f"\nSaved to {path}")
++
++
++if __name__ == "__main__":
++    fix_none_chapters("data/class_9/Lahore_board/physics/past_paper_chunks.jsonl")
+\ No newline at end of file
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/fix_none_chpspy b/fix_none_chpspy
+--- a/fix_none_chpspy	2026-11-17 13:29:17.474238095 +0500
++++ b/fix_none_chpspy	1970-01-01 05:00:00.000000000 +0500
+@@ -1,70 +0,0 @@
+-import json
+-import time
+-from google import genai
+-
+-client = genai.Client(api_key="REDACTED")
+-MODEL = "gemini-3.5-flash-lite"
+-
+-CHAPTER_LIST = """
+-1. Physical Quantities and Measurements
+-2. Kinematics
+-3. Dynamics
+-4. Turning Effects of Force
+-5. Work, Energy and Power
+-6. Mechanical Properties of Matter
+-7. Thermal Properties of Matter
+-8. Magnetism
+-9. Nature of Science
+-"""
+-
+-
+-def classify_chapter(question_text, max_retries=5):
+-    prompt = f"""Here is the list of Class 9 Physics chapters:
+-{CHAPTER_LIST}
+-
+-Question: "{question_text}"
+-
+-Which chapter number (1-9) does this question belong to? Reply with ONLY the number, nothing else."""
+-
+-    for attempt in range(max_retries):
+-        try:
+-            response = client.models.generate_content(model=MODEL, contents=prompt)
+-            text = response.text.strip()
+-            digits = ''.join(c for c in text if c.isdigit())
+-            if digits:
+-                chapter_num = int(digits)
+-                if 1 <= chapter_num <= 9:
+-                    return chapter_num
+-        except Exception as e:
+-            wait = 15  # wait long enough to clear the per-minute quota window
+-            print(f"    Error: {e}. Waiting {wait}s before retry...")
+-            time.sleep(wait)
+-
+-    return None
+-
+-
+-def fix_none_chapters(path):
+-    chunks = []
+-    with open(path, encoding="utf-8") as f:
+-        for line in f:
+-            chunks.append(json.loads(line))
+-
+-    none_chunks = [c for c in chunks if c["metadata"].get("chapter") is None]
+-    print(f"Found {len(none_chunks)} chunks needing reclassification.\n")
+-
+-    for i, chunk in enumerate(none_chunks):
+-        print(f"[{i+1}/{len(none_chunks)}] {chunk['id']}...")
+-        chapter = classify_chapter(chunk["text"])
+-        chunk["metadata"]["chapter"] = chapter
+-        print(f"    -> Chapter {chapter}")
+-        time.sleep(4)  # stay comfortably under 15 requests/minute
+-
+-    with open(path, "w", encoding="utf-8") as f:
+-        for chunk in chunks:
+-            f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+-
+-    print(f"\nSaved to {path}")
+-
+-
+-if __name__ == "__main__":
+-    fix_none_chapters("data/class_9/Lahore_board/physics/past_paper_chunks.jsonl")
+\ No newline at end of file
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/grounding_check.py b/grounding_check.py
+--- a/grounding_check.py	2026-11-17 13:23:31.027248262 +0500
++++ b/grounding_check.py	2026-11-17 13:28:17.238566200 +0500
+@@ -14,9 +14,9 @@
+ ]
+ 
+ 
++# Manual smoke test. For automated checks use:  python eval_generation.py  /  pytest -m llm
+ def run_grounding_check():
+-    from qa import ask
+-    from hybrid_search import HybridSearcher
++    from qa import ask, format_sources
+ 
+     for test in GROUNDING_TESTS:
+         print("=" * 60)
+@@ -24,7 +24,7 @@
+         print("=" * 60)
+         answer, chunks = ask(test["query"])
+         print(answer)
+-        print(f"\n(Retrieved {len(chunks)} chunks, top distance would need separate check)")
++        print(format_sources(chunks) or "\n(no chunks passed the relevance gate)")
+         print()
+ 
+ 
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/hybrid_search.py b/hybrid_search.py
+--- a/hybrid_search.py	2026-11-17 13:23:31.027209988 +0500
++++ b/hybrid_search.py	2026-11-17 13:24:23.165504387 +0500
+@@ -1,134 +1,266 @@
++"""
++Hybrid retrieval: dense (ChromaDB + BGE) + sparse (BM25), fused with
++Reciprocal Rank Fusion (RRF), optionally re-ranked by a cross-encoder.
++
++Changes vs. the first version
++-----------------------------
++* BM25 is now an *independent* retriever. Before, a BM25 hit only counted if the
++  dense retriever had already returned it, so BM25 could re-order but never
++  rescue an exact-keyword match. The old behaviour is still available with
++  ``gate_bm25=True`` so it can be measured in the ablation (see eval_retrieval.py).
++* BM25-only candidates must reach ``BM25_MIN_SCORE`` so that off-topic queries
++  still return nothing (needed for grounded refusals).
++* Optional cross-encoder re-ranking of the fused candidates.
++* ``mode`` ("dense" | "bm25" | "hybrid") for ablations, injectable embedder /
++  collection / reranker for offline testing.
++"""
+ import json
++import logging
+ import re
+-import chromadb
+-from rank_bm25 import BM25Okapi
+-from fastembed import TextEmbedding
++
++import config
++
++log = logging.getLogger(__name__)
++
++# Small English stop-word list so BM25 is driven by content words
++# ("what", "is", "the" would otherwise match almost every chunk).
++STOPWORDS = frozenset(
++    """a an the is are was were be been being of to in on at by for with from as and or
++    but if then so than that this these those it its what which who whom whose when where
++    why how do does did done can could should would will shall may might must not no yes
++    me my we our you your he she they them his her their i give tell define explain state
++    write short note about between""".split()
++)
+ 
+ 
+ def load_jsonl(path):
+     chunks = []
+     with open(path, encoding="utf-8") as f:
+         for line in f:
+-            chunks.append(json.loads(line))
++            if line.strip():
++                chunks.append(json.loads(line))
+     return chunks
+ 
+ 
+ def tokenize(text):
+-    """Simple lowercase word tokenizer for BM25"""
+-    return re.findall(r'\b\w+\b', text.lower())
++    """Lower-case word tokenizer for BM25, without stop-words."""
++    return [w for w in re.findall(r"\b\w+\b", text.lower()) if w not in STOPWORDS]
++
+ 
+ def build_where_clause(filters):
+     """
+-    Converts a simple {key: value, ...} dict into ChromaDB's required
+-    where-clause format. If there's only one condition, returns it as-is.
+-    If there are multiple, wraps them in $and.
++    Convert a simple {key: value, ...} dict to ChromaDB's where format:
++    one condition is passed as-is, several are wrapped in $and.
+     """
+-    if filters is None:
++    if not filters:
+         return None
+     if len(filters) == 1:
+         return filters
+     return {"$and": [{k: v} for k, v in filters.items()]}
+ 
+-class HybridSearcher:
+-    def __init__(self, chroma_path="chroma_db", collection_name="physics_class9"):
+-        # --- Vector search setup ---
+-        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+-        self.collection = self.chroma_client.get_collection(name=collection_name)
+-        self.embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+-
+-        # --- BM25 setup ---
+-        # Load the same chunks used to build the vector DB, so IDs line up
+-        textbook_chunks = load_jsonl("data/class_9/Lahore_board/physics/textbook_chunks.jsonl")
+-        past_paper_chunks = load_jsonl("data/class_9/Lahore_board/physics/past_paper_chunks.jsonl")
+-        self.all_chunks = textbook_chunks + past_paper_chunks
+-
+-        self.chunk_ids = [c["id"] for c in self.all_chunks]
+-        self.chunk_texts = [c["text"] for c in self.all_chunks]
+-        self.id_to_chunk = {c["id"]: c for c in self.all_chunks}
+ 
+-        tokenized_corpus = [tokenize(t) for t in self.chunk_texts]
+-        self.bm25 = BM25Okapi(tokenized_corpus)
++def matches_filter(chunk, where_filter):
++    if not where_filter:
++        return True
++    return all(chunk["metadata"].get(k) == v for k, v in where_filter.items())
+ 
+-    def vector_search(self, query, n_results=20, where_filter=None, max_distance=None):
+-        """Returns list of chunk_ids from semantic search, best rank first.
+-        If max_distance is set, filters out results with distance beyond that threshold."""
+-        query_embedding = list(self.embedding_model.embed([query]))[0].tolist()
+-        chroma_where = build_where_clause(where_filter)
+-        results = self.collection.query(
+-            query_embeddings=[query_embedding],
+-            n_results=n_results,
+-            where=chroma_where
+-        )
+ 
+-        ids = results["ids"][0]
+-        distances = results["distances"][0]
++class CrossEncoderReranker:
++    """Thin wrapper around fastembed's cross-encoder (loaded lazily)."""
+ 
+-        if max_distance is not None:
+-            ids = [cid for cid, dist in zip(ids, distances) if dist <= max_distance]
++    def __init__(self, model_name=None):
++        from fastembed.rerank.cross_encoder import TextCrossEncoder
+ 
+-        return ids
++        self.model_name = model_name or config.RERANK_MODEL
++        self.model = TextCrossEncoder(model_name=self.model_name)
+ 
+-    def bm25_search(self, query, n_results=20, where_filter=None):
+-        """Returns list of chunk_ids from keyword search, best rank first"""
+-        tokenized_query = tokenize(query)
+-        scores = self.bm25.get_scores(tokenized_query)
+-
+-        # Pair each chunk_id with its BM25 score
+-        scored = list(zip(self.chunk_ids, scores))
+-
+-        # Apply metadata filter manually (BM25 has no native filtering)
+-        if where_filter:
+-            scored = [
+-                (cid, score) for cid, score in scored
+-                if all(self.id_to_chunk[cid]["metadata"].get(k) == v for k, v in where_filter.items())
+-            ]
++    def score(self, query, texts):
++        return [float(s) for s in self.model.rerank(query, texts)]
++
++
++class HybridSearcher:
++    def __init__(
++        self,
++        chunks=None,
++        collection=None,
++        embed_fn=None,
++        reranker=None,
++        use_reranker=None,
++        chroma_path=None,
++        collection_name=None,
++    ):
++        # --- chunks (shared by BM25 and the id -> chunk lookup) ---
++        if chunks is None:
++            chunks = load_jsonl(config.TEXTBOOK_CHUNKS) + load_jsonl(config.PAST_PAPER_CHUNKS)
++        self.all_chunks = chunks
++        self.chunk_ids = [c["id"] for c in chunks]
++        self.id_to_chunk = {c["id"]: c for c in chunks}
++
++        # --- dense side (lazy so BM25-only use / tests need no model download) ---
++        self._collection = collection
++        self._chroma_path = chroma_path or config.CHROMA_PATH
++        self._collection_name = collection_name or config.COLLECTION_NAME
++        self._embed_fn = embed_fn
++
++        # --- sparse side ---
++        from rank_bm25 import BM25Okapi
++
++        self.bm25 = BM25Okapi([tokenize(c["text"]) or ["_empty_"] for c in chunks])
++
++        # --- re-ranker (optional, fail-soft) ---
++        self._reranker = reranker
++        self._use_reranker = config.USE_RERANKER if use_reranker is None else use_reranker
++        self._reranker_failed = False
++
++    # ------------------------------------------------------------ lazy parts
++    @property
++    def collection(self):
++        if self._collection is None:
++            import chromadb
++
++            client = chromadb.PersistentClient(path=self._chroma_path)
++            self._collection = client.get_collection(name=self._collection_name)
++        return self._collection
++
++    @property
++    def embed_fn(self):
++        if self._embed_fn is None:
++            from fastembed import TextEmbedding
++
++            model = TextEmbedding(model_name=config.EMBED_MODEL)
++            self._embed_fn = lambda q: list(model.embed([q]))[0].tolist()
++        return self._embed_fn
++
++    @property
++    def reranker(self):
++        if self._reranker is None and self._use_reranker and not self._reranker_failed:
++            try:
++                self._reranker = CrossEncoderReranker()
++            except Exception as exc:  # no internet, unsupported model, ...
++                log.warning("Re-ranker unavailable (%s); continuing without it.", exc)
++                self._reranker_failed = True
++        return self._reranker
++
++    # ------------------------------------------------------------ retrievers
++    def dense_candidates(self, query, n_results=None, where_filter=None, max_distance=None):
++        """[(chunk_id, distance)] best first; distance above max_distance is dropped."""
++        n_results = n_results or config.CANDIDATES
++        res = self.collection.query(
++            query_embeddings=[self.embed_fn(query)],
++            n_results=n_results,
++            where=build_where_clause(where_filter),
++        )
++        pairs = list(zip(res["ids"][0], res["distances"][0]))
++        if max_distance is not None:
++            pairs = [(cid, d) for cid, d in pairs if d <= max_distance]
++        return pairs
+ 
++    def bm25_candidates(self, query, n_results=None, where_filter=None, min_score=None):
++        """[(chunk_id, bm25_score)] best first; only positive scores >= min_score."""
++        n_results = n_results or config.CANDIDATES
++        tokens = tokenize(query)
++        if not tokens:
++            return []
++        scores = self.bm25.get_scores(tokens)
++        scored = [
++            (cid, float(s))
++            for cid, s in zip(self.chunk_ids, scores)
++            if s > 0 and matches_filter(self.id_to_chunk[cid], where_filter)
++        ]
+         scored.sort(key=lambda x: x[1], reverse=True)
+-        return [cid for cid, score in scored[:n_results]]
++        if min_score:
++            scored = [(cid, s) for cid, s in scored if s >= min_score]
++        return scored[:n_results]
+ 
+-    def hybrid_search(self, query, n_results=5, where_filter=None, k=60, max_distance=0.65):
+-        """
+-        Combines vector search and BM25 search using RRF.
+-        Only chunks that pass the vector-distance threshold are eligible —
+-        BM25 can help re-rank among those, but cannot introduce chunks
+-        that vector search considers too dissimilar.
+-        """
+-        vector_ids = self.vector_search(query, n_results=20, where_filter=where_filter, max_distance=max_distance)
+-        bm25_ids = self.bm25_search(query, n_results=20, where_filter=where_filter)
++    # kept for backwards compatibility with the old API (ids only)
++    def vector_search(self, query, n_results=20, where_filter=None, max_distance=None):
++        return [c for c, _ in self.dense_candidates(query, n_results, where_filter, max_distance)]
+ 
+-        # Restrict eligible candidates to those that passed the vector threshold
+-        eligible = set(vector_ids)
++    def bm25_search(self, query, n_results=20, where_filter=None):
++        return [c for c, _ in self.bm25_candidates(query, n_results, where_filter)]
+ 
+-        rrf_scores = {}
+-        for rank, cid in enumerate(vector_ids):
+-            rrf_scores[cid] = rrf_scores.get(cid, 0) + 1 / (k + rank + 1)
+-        for rank, cid in enumerate(bm25_ids):
+-            if cid in eligible:  # only count BM25 rank if it's already a valid vector match
+-                rrf_scores[cid] = rrf_scores.get(cid, 0) + 1 / (k + rank + 1)
++    # ------------------------------------------------------------ main entry
++    def search(
++        self,
++        query,
++        n_results=5,
++        where_filter=None,
++        max_distance=None,
++        mode="hybrid",
++        rerank=None,
++        gate_bm25=False,
++        bm25_min_score=None,
++        k=None,
++    ):
++        """
++        Return up to ``n_results`` chunks (copies) with a ``retrieval`` dict that
++        explains where each came from.
+ 
+-        ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+-        top_ids = [cid for cid, score in ranked[:n_results]]
++        mode        "hybrid" (dense + BM25 via RRF), "dense", or "bm25".
++        rerank      None = use the searcher default; True/False to force.
++        gate_bm25   reproduce the OLD behaviour: BM25 ranks only count for chunks
++                    the dense retriever already returned (used for the ablation).
++        max_distance dense distance gate (None = no gate).
++        """
++        k = k or config.RRF_K
++        bm25_min = config.BM25_MIN_SCORE if bm25_min_score is None else bm25_min_score
++        dense, sparse = [], []
++
++        if mode in ("hybrid", "dense"):
++            dense = self.dense_candidates(query, where_filter=where_filter, max_distance=max_distance)
++        if mode in ("hybrid", "bm25"):
++            sparse = self.bm25_candidates(query, where_filter=where_filter, min_score=bm25_min)
++
++        dense_dist = dict(dense)
++        bm25_score = dict(sparse)
++        if gate_bm25:
++            sparse = [(cid, s) for cid, s in sparse if cid in dense_dist]
++
++        rrf = {}
++        for rank, (cid, _) in enumerate(dense):
++            rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (k + rank + 1)
++        for rank, (cid, _) in enumerate(sparse):
++            rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (k + rank + 1)
++
++        ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
++
++        use_rerank = self._use_reranker if rerank is None else rerank
++        rerank_scores = {}
++        if use_rerank and ranked:
++            reranker = self.reranker
++            if reranker is not None:
++                pool = ranked[: max(config.RERANK_CANDIDATES, n_results)]
++                texts = [self.id_to_chunk[cid]["text"] for cid, _ in pool]
++                for (cid, _), s in zip(pool, reranker.score(query, texts)):
++                    rerank_scores[cid] = s
++                ranked = sorted(
++                    pool, key=lambda x: rerank_scores[x[0]], reverse=True
++                )
++
++        out = []
++        for rank, (cid, score) in enumerate(ranked[:n_results], 1):
++            chunk = dict(self.id_to_chunk[cid])
++            chunk["retrieval"] = {
++                "rank": rank,
++                "rrf": round(score, 5),
++                "dense_distance": dense_dist.get(cid),
++                "bm25_score": bm25_score.get(cid),
++                "rerank_score": rerank_scores.get(cid),
++            }
++            out.append(chunk)
++        return out
+ 
+-        return [self.id_to_chunk[cid] for cid in top_ids]
++    def hybrid_search(self, query, n_results=5, where_filter=None, k=60, max_distance=0.65):
++        """Backwards-compatible wrapper around :meth:`search`."""
++        return self.search(
++            query, n_results=n_results, where_filter=where_filter, max_distance=max_distance, k=k
++        )
+ 
+ 
+ if __name__ == "__main__":
+     searcher = HybridSearcher()
+-
+-    print("=" * 50)
+-    print("TEST: 'Newton's law' (past paper MCQs only) — HYBRID")
+-    print("=" * 50)
+-    results = searcher.hybrid_search("Newton's law", where_filter={"question_type": "MCQ"})
+-    for r in results:
+-        print(f"\nID: {r['id']}")
+-        print(f"Metadata: {r['metadata']}")
+-        print(f"Text: {r['text'][:200]}")
+-
+-    print("\n" + "=" * 50)
+-    print("TEST: 'centre of gravity' (chapter 4 only) — HYBRID")
+-    print("=" * 50)
+-    results = searcher.hybrid_search("centre of gravity", where_filter={"chapter": 4})
+-    for r in results:
+-        print(f"\nID: {r['id']}")
+-        print(f"Metadata: {r['metadata']}")
+-        print(f"Text: {r['text'][:200]}")
+\ No newline at end of file
++    for q, f in [("Newton's law", {"question_type": "MCQ"}), ("centre of gravity", {"chapter": 4})]:
++        print("=" * 60, f"\n{q!r} filter={f}\n" + "=" * 60)
++        for r in searcher.search(q, where_filter=f, max_distance=config.MAX_DISTANCE):
++            print(r["id"], r["metadata"], r["retrieval"])
++            print("   ", r["text"][:160].replace("\n", " "))
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/pdf_to_text.py b/pdf_to_text.py
+--- a/pdf_to_text.py	2026-11-17 13:29:17.473766200 +0500
++++ b/pdf_to_text.py	2026-11-17 13:24:37.640278409 +0500
+@@ -4,11 +4,11 @@
+ from pathlib import Path
+ from pdf2image import convert_from_path
+ from io import BytesIO
+-from google import genai
++from config import get_client, LLM_MODEL
+ from google.genai import types
+ 
+-client = genai.Client(api_key="REDACTED")
+-MODEL = "gemini-3.5-flash-lite" # generous free tier (higher daily requests)
++client = get_client()
++MODEL = LLM_MODEL
+ 
+ 
+ def pdf_to_images(pdf_path, dpi=150):
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/pytest.ini b/pytest.ini
+--- a/pytest.ini	1970-01-01 05:00:00.000000000 +0500
++++ b/pytest.ini	2026-11-17 13:27:48.437082706 +0500
+@@ -0,0 +1,5 @@
++[pytest]
++testpaths = tests
++pythonpath = .
++markers =
++    llm: calls the live Gemini API (set RUN_LLM_TESTS=1 and GEMINI_API_KEY to run)
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/qa.py b/qa.py
+--- a/qa.py	2026-11-17 13:29:17.473206005 +0500
++++ b/qa.py	2026-11-17 13:29:58.631375752 +0500
+@@ -1,76 +1,120 @@
++"""
++Question answering on top of HybridSearcher + Gemini.
++
++One shared pipeline (`prepare`) feeds both `ask` (blocking) and `ask_stream`
++(streaming), so the retrieval logic exists exactly once.
++"""
++import logging
+ import re
+-from google import genai
++import time
++from dataclasses import dataclass, field
++
++import config
+ from hybrid_search import HybridSearcher
+ 
+-client = genai.Client(api_key="REDACTED")
+-MODEL = "gemini-3.5-flash-lite"
++log = logging.getLogger(__name__)
++
++MODEL = config.LLM_MODEL
++
++_client = None
++_searcher = None  # module-level caches, created once
++
+ 
+-_searcher = None  # module-level cache, created only once
++def get_client():
++    """Gemini client, created lazily so importing this module needs no API key."""
++    global _client
++    if _client is None:
++        _client = config.get_client()
++    return _client
+ 
+ 
+ def get_searcher():
+-    """Lazily creates the HybridSearcher once and reuses it across calls"""
++    """HybridSearcher, created lazily and reused across calls."""
+     global _searcher
+     if _searcher is None:
+         _searcher = HybridSearcher()
+     return _searcher
+ 
+ 
++# ------------------------------------------------------------------ language
+ HINGLISH_MARKERS = {
+-    "hai", "hain", "kya", "kyun", "kaise", "mein", "ka", "ki", "ke", "wala",
++    "hai", "hain", "kya", "kyun", "kyu", "kaise", "mein", "ka", "ki", "ke", "wala",
+     "batao", "samjhao", "kar", "karo", "kro", "nahi", "nai", "acha", "theek",
+     "yeh", "woh", "aap", "tum", "mujhe", "humein", "kahan", "kab", "kitna",
+-    "asaan", "matlab", "chahiye", "raha", "rahi", "rha",
++    "asaan", "matlab", "chahiye", "raha", "rahi", "rha", "ko", "se", "bhi", "aur",
+ }
+ 
+ 
+ def detect_language(text):
+     """
+-    Rough heuristic: if the text contains common Hinglish/Roman-Urdu words,
+-    treat it as Hinglish. Otherwise treat it as English.
++    Heuristic: Roman-Urdu/Hinglish if the text has >=2 marker words, or 1 marker
++    in a short message ("Pascal's law kya hai?"). Otherwise English.
+     """
+-    words = set(re.findall(r'\b\w+\b', text.lower()))
+-    hinglish_hits = words & HINGLISH_MARKERS
+-    return "hinglish" if len(hinglish_hits) >= 1 else "english"
++    words = re.findall(r"\b\w+\b", text.lower())
++    hits = [w for w in words if w in HINGLISH_MARKERS]
++    if len(hits) >= 2 or (len(hits) == 1 and len(words) <= 6):
++        return "hinglish"
++    return "english"
+ 
++
++NOT_FOUND = {
++    "english": "I could not find this topic in the textbook or the past papers.",
++    "hinglish": "Ye topic textbook ya past papers mein nahi mila.",
++}
++
++
++# ------------------------------------------------------------------- filters
+ def extract_implicit_filters(broad_query, current_query=None):
+     """
+-    Detects chapter and question-type filters from query text.
+-    Chapter is detected from the broader (history-inclusive) query, since
+-    it tends to stay the same across a follow-up conversation.
+-    Question type is detected ONLY from the current message, since it can
+-    change turn-to-turn and shouldn't "stick" from an earlier message.
++    Detect chapter / question-type filters from the query text.
++    Chapter comes from the broader (history-inclusive) query since it tends to
++    stay constant over a conversation. Question type is read ONLY from the
++    current message so it does not "stick" to later turns.
+     """
+     if current_query is None:
+         current_query = broad_query
+ 
+     filters = {}
+-
+-    chapter_match = re.search(r'chapter\s+(\d+)|chp\.?\s+(\d+)|\bch\.?\s+(\d+)', broad_query, re.IGNORECASE)
++    chapter_match = re.search(
++        r"chapter\s+(\d+)|chp\.?\s+(\d+)|\bch\.?\s+(\d+)", broad_query, re.IGNORECASE
++    )
+     if chapter_match:
+-        chapter_num = next(g for g in chapter_match.groups() if g is not None)
+-        filters["chapter"] = int(chapter_num)
++        filters["chapter"] = int(next(g for g in chapter_match.groups() if g is not None))
+ 
+-    current_lower = current_query.lower()
+-    if re.search(r'\bmcqs?\b', current_lower):
++    q = current_query.lower()
++    if re.search(r"\bmcqs?\b", q):
+         filters["question_type"] = "MCQ"
+-    elif "long question" in current_lower or re.search(r'\blong\b', current_lower):
++    elif re.search(r"\blong\s+(questions?|q)\b", q):
+         filters["question_type"] = "long"
+-    elif "short question" in current_lower:
++    elif re.search(r"\bshort\s+(questions?|q)\b", q):
+         filters["question_type"] = "short"
+ 
+-    return filters if filters else None
++    return filters or None
++
++
++# ------------------------------------------------------------------ prompting
++def source_label(meta):
++    if meta.get("source_type") == "textbook":
++        return f"Textbook, Chapter {meta.get('chapter')}, Page {meta.get('page')}"
++    return (
++        f"Past Paper {meta.get('year')} Group {meta.get('group')} "
++        f"({meta.get('paper_type')}, {meta.get('question_type')})"
++    )
++
+ 
+ def format_context(chunks):
+-    lines = []
+-    for i, c in enumerate(chunks, 1):
+-        meta = c["metadata"]
+-        if meta.get("source_type") == "textbook":
+-            source_label = f"Textbook, Chapter {meta.get('chapter')}, Page {meta.get('page')}"
+-        else:
+-            source_label = f"Past Paper, {meta.get('year')} Group {meta.get('group')} ({meta.get('paper_type')}, {meta.get('question_type')})"
+-        lines.append(f"[Source {i} — {source_label}]\n{c['text']}")
+-    return "\n\n".join(lines)
++    return "\n\n".join(
++        f"[Source {i} — {source_label(c['metadata'])}]\n{c['text']}"
++        for i, c in enumerate(chunks, 1)
++    )
++
++
++def format_sources(chunks):
++    """Markdown list shown under an answer; numbering matches the [Source n] tags."""
++    if not chunks:
++        return ""
++    lines = [f"{i}. {source_label(c['metadata'])}" for i, c in enumerate(chunks, 1)]
++    return "\n\n---\n**Sources used**\n" + "\n".join(lines)
+ 
+ 
+ def build_prompt(query, context, instruction_extra="", language="english"):
+@@ -79,15 +123,15 @@
+         if language == "hinglish"
+         else "Respond in plain English."
+     )
+-
+-    prompt = f"""You are a study tutor for Class 9 Physics (Lahore Board / Punjab Textbook Board), helping a student prepare for their board exams.
++    return f"""You are a study tutor for Class 9 Physics (Lahore Board / Punjab Textbook Board), helping a student prepare for their board exams.
+ 
+ STRICT RULES:
+ 1. For factual content (definitions, explanations, concepts), answer ONLY using the information in the sources below. Do not add outside facts, even if you know them.
+-2. For MCQ correct answers specifically: FIRST check if the sources state the correct option directly — if so, use that. If the sources do NOT state the correct option (which is common, since Lahore Board past papers don't publish answer keys), then solve it yourself using your own Physics knowledge and give the correct answer confidently and accurately, the way a real tutor would. Briefly mention whether the answer came from the source or was solved by you, so the student knows the difference — but always give a definite, correct answer rather than saying "not found".
+-3. If the sources genuinely don't cover the topic at all (not a missing answer key, but the whole topic/concept is absent), say so honestly instead of guessing.
+-4. You MAY reorganize, summarize, or add headings/structure for readability.
+-5. {lang_instruction}
++2. Cite the supporting source after each factual statement as [Source n], using the numbers in the sources below.
++3. For MCQ correct answers: FIRST check whether the sources state the correct option directly. If they do, give it and start the line with "Answer (from sources):". If they do NOT (Lahore Board past papers publish no answer key), solve it yourself with your Physics knowledge, give a definite answer, and start the line with "Answer (solved by tutor, not stated in sources):" so the student knows the difference.
++4. If the sources do not cover the topic at all (a missing answer key is not the same as a missing topic), say so honestly instead of guessing.
++5. You MAY reorganize, summarize, or add headings/structure for readability.
++6. {lang_instruction}
+ 
+ {instruction_extra}
+ 
+@@ -97,120 +141,131 @@
+ STUDENT'S QUESTION: {query}
+ 
+ Answer:"""
+-    return prompt
+ 
+-def rewrite_query(message, qa_pairs):
++
++def _generate(prompt, retries=3):
++    """Blocking Gemini call with exponential back-off."""
++    last = None
++    for attempt in range(retries):
++        try:
++            return get_client().models.generate_content(model=MODEL, contents=prompt).text
++        except Exception as exc:  # rate limit, network, ...
++            last = exc
++            log.warning("Gemini call failed (%s); retry %d/%d", exc, attempt + 1, retries)
++            time.sleep(2 ** attempt)
++    raise last
++
++
++def rewrite_query(message, qa_pairs=None, language="english"):
+     """
+-    Uses the LLM to rewrite a follow-up message into a standalone question,
+-    using recent conversation history. This replaces fragile regex-based
+-    filter-carrying logic with a general solution — e.g. "explain them too"
+-    becomes "Explain the difference between like and unlike parallel forces,
+-    the first condition of equilibrium, ..." based on what was just discussed.
++    Turn a follow-up ("explain them too") into a standalone ENGLISH question.
++    The embedding model (bge-small-en) is English-only, so Roman-Urdu questions
++    are also normalised to English here. Falls back to the original message on
++    any failure.
+     """
+-    if not qa_pairs:
+-        return message  # nothing to rewrite from, use as-is
++    if not qa_pairs and language == "english":
++        return message  # nothing to resolve, nothing to translate
+ 
+-    history_text = ""
+-    for u, a in qa_pairs:
+-        history_text += f"Student: {u}\nTutor: {a}\n\n"
+-
+-    prompt = f"""Given this conversation history and a new student message, rewrite the new message as a fully standalone question that makes sense without needing the history. Keep any chapter/topic/question-type references explicit. If the new message is already standalone, return it unchanged. Reply with ONLY the rewritten question, nothing else.
++    history_text = "".join(f"Student: {u}\nTutor: {a}\n\n" for u, a in (qa_pairs or []))
++    prompt = f"""Rewrite the new student message as ONE fully standalone English question that makes sense without the conversation history.
++- Keep chapter / topic / question-type references explicit.
++- If the message is in Roman Urdu or Hinglish, translate it to English.
++- If it is already standalone English, return it unchanged.
++Reply with ONLY the rewritten question.
+ 
+ CONVERSATION HISTORY:
+-{history_text}
++{history_text or '(none)'}
+ 
+ NEW MESSAGE: {message}
+ 
+-Rewritten standalone question:"""
+-
++Standalone English question:"""
+     try:
+-        response = client.models.generate_content(model=MODEL, contents=prompt)
+-        rewritten = response.text.strip()
+-        return rewritten if rewritten else message
++        rewritten = (_generate(prompt, retries=2) or "").strip()
++        return rewritten or message
+     except Exception:
+-        return message  # fall back to original on any failure
++        return message
+ 
+-def ask(query, n_results=5, where_filter=None, instruction_extra="", max_distance=0.65, lang_query=None, display_query=None, qa_pairs=None):
+-    searcher = get_searcher()
+ 
+-    effective_query = rewrite_query(query, qa_pairs) if qa_pairs else query
++# ------------------------------------------------------------------- pipeline
++@dataclass
++class Prepared:
++    effective_query: str
++    language: str
++    where_filter: dict = None
++    chunks: list = field(default_factory=list)
++    prompt: str = ""
+ 
+-    # If the query asks for "all" or "saare" of something, retrieve generously
+-    # so complete sets (e.g. all 12 MCQs from a paper) aren't cut short
+-    query_lower = effective_query.lower()
+-    if any(word in query_lower for word in ["all mcqs", "saare mcq", "sare mcq", "all questions", "saare question", "complete list"]):
+-        n_results = 25
+-
+-    # If the rewritten query is long/complex (covers multiple sub-topics,
+-    # as often happens with "explain these" follow-ups), retrieve more
+-    # chunks so each sub-topic has a fair chance of being covered
+-    effective_n_results = n_results
+-    word_count = len(effective_query.split())
+-    if word_count > 15:
+-        effective_n_results = min(n_results * 2, 25)
+ 
+-    if where_filter is None:
+-        where_filter = extract_implicit_filters(effective_query, current_query=effective_query)
+-
+-    effective_max_distance = None if where_filter else max_distance
+-
+-    chunks = searcher.hybrid_search(
+-        effective_query, n_results=effective_n_results, where_filter=where_filter, max_distance=effective_max_distance
+-    )
++LIST_ALL_HINTS = ("all mcqs", "saare mcq", "sare mcq", "all questions", "saare question", "complete list")
+ 
+-    if not chunks and where_filter:
+-        chunks = searcher.hybrid_search(
+-            effective_query, n_results=effective_n_results, where_filter=None, max_distance=max_distance
+-        )
+ 
+-    if not chunks:
+-        return "Ye topic textbook ya past papers mein nahi mila.", []
++def prepare(query, n_results=5, where_filter=None, instruction_extra="", max_distance=None,
++            lang_query=None, qa_pairs=None, searcher=None):
++    """Language detection -> query rewriting -> filters -> retrieval -> prompt."""
++    searcher = searcher or get_searcher()
++    max_distance = config.MAX_DISTANCE if max_distance is None else max_distance
+ 
+-    context = format_context(chunks)
+     language = detect_language(lang_query if lang_query else query)
+-    prompt = build_prompt(effective_query, context, instruction_extra, language=language)
+-
+-    response = client.models.generate_content(model=MODEL, contents=prompt)
+-    return response.text, chunks
+-
+-def ask_stream(query, n_results=5, where_filter=None, instruction_extra="", max_distance=0.65, lang_query=None, display_query=None, qa_pairs=None):
+-    searcher = get_searcher()
++    effective_query = rewrite_query(query, qa_pairs, language)
+ 
+-    effective_query = rewrite_query(query, qa_pairs) if qa_pairs else query
+-
+-    effective_n_results = n_results
+-    word_count = len(effective_query.split())
+-    if word_count > 15:
+-        effective_n_results = min(n_results * 3, 20)
++    if any(h in effective_query.lower() for h in LIST_ALL_HINTS):
++        n_results = 25  # complete sets (e.g. all 12 MCQs of a paper) must not be cut short
++    elif len(effective_query.split()) > 15:
++        n_results = min(n_results * 2, 25)  # multi-topic follow-ups need more chunks
+ 
+     if where_filter is None:
+         where_filter = extract_implicit_filters(effective_query, current_query=effective_query)
+ 
+-    effective_max_distance = None if where_filter else max_distance
+-
+-    chunks = searcher.hybrid_search(
+-        effective_query, n_results=effective_n_results, where_filter=where_filter, max_distance=effective_max_distance
+-    )
++    # Distance gate:
++    #  * no filter            -> strict gate (out-of-scope questions retrieve nothing)
++    #  * chapter / source     -> relaxed gate (still rejects unrelated questions)
++    #  * question_type filter -> no gate: "show MCQs from chapter 4" is a browse request
++    #    with little semantic overlap, so ranking decides, as in the first version.
++    if not where_filter:
++        gate = max_distance
++    elif "question_type" in where_filter:
++        gate = None
++    else:
++        gate = config.RELAXED_MAX_DISTANCE
++    chunks = searcher.search(effective_query, n_results=n_results, where_filter=where_filter, max_distance=gate)
++
++    if not chunks and where_filter:  # filter too narrow: retry across everything, strict gate
++        chunks = searcher.search(effective_query, n_results=n_results, max_distance=max_distance)
++
++    prompt = ""
++    if chunks:
++        prompt = build_prompt(effective_query, format_context(chunks), instruction_extra, language)
++    return Prepared(effective_query, language, where_filter, chunks, prompt)
++
++
++def ask(query, n_results=5, where_filter=None, instruction_extra="", max_distance=None,
++        lang_query=None, display_query=None, qa_pairs=None):
++    """Blocking version. Returns (answer_text, chunks)."""
++    p = prepare(query, n_results, where_filter, instruction_extra, max_distance, lang_query, qa_pairs)
++    if not p.chunks:
++        return NOT_FOUND[p.language], []
++    return _generate(p.prompt), p.chunks
+ 
+-    if not chunks and where_filter:
+-        chunks = searcher.hybrid_search(
+-            effective_query, n_results=effective_n_results, where_filter=None, max_distance=max_distance
+-        )
+ 
+-    if not chunks:
+-        yield "Ye topic textbook ya past papers mein nahi mila."
++def ask_stream(query, n_results=5, where_filter=None, instruction_extra="", max_distance=None,
++               lang_query=None, display_query=None, qa_pairs=None):
++    """
++    Streaming version for the UI: yields the answer-so-far, and finally the full
++    answer followed by the list of sources that were used.
++    """
++    p = prepare(query, n_results, where_filter, instruction_extra, max_distance, lang_query, qa_pairs)
++    if not p.chunks:
++        yield NOT_FOUND[p.language]
+         return
+ 
+-    context = format_context(chunks)
+-    language = detect_language(lang_query if lang_query else query)
+-    prompt = build_prompt(effective_query, context, instruction_extra, language=language)
++    partial = ""
++    for piece in get_client().models.generate_content_stream(model=MODEL, contents=p.prompt):
++        if piece.text:
++            partial += piece.text
++            yield partial
++    yield partial + format_sources(p.chunks)
+ 
+-    partial_text = ""
+-    for chunk in client.models.generate_content_stream(model=MODEL, contents=prompt):
+-        if chunk.text:
+-            partial_text += chunk.text
+-            yield partial_text
+ 
+ if __name__ == "__main__":
+     answer, chunks = ask("What is Pascal's law?")
+-    print(answer)
+\ No newline at end of file
++    print(answer + format_sources(chunks))
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/requirements.txt b/requirements.txt
+--- a/requirements.txt	1970-01-01 05:00:00.000000000 +0500
++++ b/requirements.txt	2026-11-17 13:28:45.112300403 +0500
+@@ -0,0 +1,14 @@
++# Core
++chromadb>=0.5
++fastembed>=0.4
++rank-bm25>=0.2.2
++google-genai>=1.0
++gradio>=4.40
++python-dotenv>=1.0
++
++# Data preparation only (PDF -> images -> OCR). Needs the poppler system package.
++pdf2image>=1.17
++pillow>=10.0
++
++# Development
++pytest>=8.0
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tag_chapters_pastpapers.py b/tag_chapters_pastpapers.py
+--- a/tag_chapters_pastpapers.py	2026-11-17 13:29:17.473996210 +0500
++++ b/tag_chapters_pastpapers.py	2026-11-17 13:24:37.640484649 +0500
+@@ -1,10 +1,10 @@
+ import json
+ import time
+ from pathlib import Path
+-from google import genai
++from config import get_client, LLM_MODEL
+ 
+-client = genai.Client(api_key="REDACTED")
+-MODEL = "gemini-3.5-flash-lite"
++client = get_client()
++MODEL = LLM_MODEL
+ 
+ CHAPTER_LIST = """
+ 1. Physical Quantities and Measurements
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/conftest.py b/tests/conftest.py
+--- a/tests/conftest.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/conftest.py	2026-11-17 13:27:48.437977429 +0500
+@@ -0,0 +1,51 @@
++import hashlib
++import math
++import re
++import uuid
++
++import pytest
++
++
++def fake_embed(text, dim=64):
++    """Deterministic bag-of-words hashing embedder - no model download needed."""
++    vec = [0.0] * dim
++    for w in re.findall(r"\w+", text.lower()):
++        h = int(hashlib.md5(w.encode()).hexdigest(), 16)
++        vec[h % dim] += 1.0
++    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
++    return [v / norm for v in vec]
++
++
++def make_chunk(cid, text, **meta):
++    base = {"source_type": "textbook", "chapter": 1, "page": 1}
++    base.update(meta)
++    return {"id": cid, "text": text, "metadata": base}
++
++
++@pytest.fixture
++def corpus():
++    return [
++        make_chunk("t1", "Pressure is the force exerted normally on unit area of a surface", chapter=6, page=132),
++        make_chunk("t2", "Pascal law states that pressure applied to a liquid is transmitted equally", chapter=6, page=140),
++        make_chunk("t3", "Torque is the product of force and moment arm about the axis of rotation", chapter=4, page=83),
++        make_chunk("t4", "Kinetic energy is the energy possessed by a body due to its motion", chapter=5, page=105),
++        make_chunk("t5", "A zxqvwidget is an extremely rare apparatus described only here", chapter=9, page=190),
++        make_chunk("p1", "Define torque. What is its SI unit?", source_type="past_paper", chapter=4, question_type="short", year=2024, group="I", paper_type="subjective"),
++        make_chunk("p2", "8 The SI unit of pressure is: A) Pascal B) Newton C) Joule D) Watt", source_type="past_paper", chapter=6, question_type="MCQ", year=2023, group="II", paper_type="objective"),
++    ]
++
++
++@pytest.fixture
++def searcher(corpus):
++    import chromadb
++    from hybrid_search import HybridSearcher
++
++    client = chromadb.EphemeralClient()
++    col = client.create_collection(name=f"test_{uuid.uuid4().hex[:8]}")
++    col.add(
++        ids=[c["id"] for c in corpus],
++        documents=[c["text"] for c in corpus],
++        embeddings=[fake_embed(c["text"]) for c in corpus],
++        metadatas=[c["metadata"] for c in corpus],
++    )
++    return HybridSearcher(chunks=corpus, collection=col, embed_fn=fake_embed, use_reranker=False)
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_chunking.py b/tests/test_chunking.py
+--- a/tests/test_chunking.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_chunking.py	2026-11-17 13:27:48.442459356 +0500
+@@ -0,0 +1,29 @@
++from chunk_and_tag import chunk_text, extract_chapter_number
++
++
++def test_short_text_is_one_chunk():
++    assert len(chunk_text("word " * 100)) == 1
++
++
++def test_no_redundant_tail_chunk():
++    # 340 words fit in ONE 350-word chunk; the old loop emitted a second chunk
++    # made only of words already covered by the first.
++    assert len(chunk_text("w " * 340)) == 1
++    assert len(chunk_text("w " * 350)) == 1
++
++
++def test_overlap_and_coverage():
++    words = [f"w{i}" for i in range(700)]
++    chunks = chunk_text(" ".join(words), chunk_size=350, overlap=50)
++    assert len(chunks) == 3
++    assert chunks[0].split()[-50:] == chunks[1].split()[:50]  # 50-word overlap
++    assert chunks[-1].split()[-1] == "w699"                  # nothing is lost at the end
++
++
++def test_empty_text():
++    assert chunk_text("   ") == []
++
++
++def test_chapter_number_extraction():
++    assert extract_chapter_number("CHAPTER 4 Turning Effects") == 4
++    assert extract_chapter_number("no heading here") is None
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_data_and_gold.py b/tests/test_data_and_gold.py
+--- a/tests/test_data_and_gold.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_data_and_gold.py	2026-11-17 13:27:48.449977430 +0500
+@@ -0,0 +1,50 @@
++import json
++
++import pytest
++
++import config
++from eval_retrieval import is_relevant, load_gold
++
++needs_data = pytest.mark.skipif(
++    not (config.TEXTBOOK_CHUNKS.exists() and config.PAST_PAPER_CHUNKS.exists()),
++    reason="chunk files not present",
++)
++
++
++def load(path):
++    return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
++
++
++@needs_data
++def test_chunk_ids_are_unique_and_text_not_empty():
++    chunks = load(config.TEXTBOOK_CHUNKS) + load(config.PAST_PAPER_CHUNKS)
++    ids = [c["id"] for c in chunks]
++    assert len(ids) == len(set(ids))
++    assert all(c["text"].strip() for c in chunks)
++
++
++@needs_data
++def test_every_answerable_gold_query_has_a_relevant_chunk():
++    """If this fails after re-chunking, the gold set no longer matches the data."""
++    chunks = load(config.TEXTBOOK_CHUNKS) + load(config.PAST_PAPER_CHUNKS)
++    missing = [
++        g["id"] for g in load_gold()
++        if not g.get("should_refuse")
++        and not any(is_relevant(c["text"], g["answer_phrases"]) for c in chunks)
++    ]
++    assert not missing, f"no chunk contains the answer phrase for: {missing}"
++
++
++def test_gold_set_shape():
++    gold = load_gold()
++    assert len({g["id"] for g in gold}) == len(gold)
++    assert any(g.get("should_refuse") for g in gold) and any(not g.get("should_refuse") for g in gold)
++    assert all(g["answer_phrases"] for g in gold if not g.get("should_refuse"))
++
++
++def test_no_secrets_in_source_files():
++    import pathlib, re
++
++    pattern = re.compile(r"AIza[0-9A-Za-z_-]{20,}|AQ\.[A-Za-z0-9_-]{20,}")
++    for path in pathlib.Path(".").glob("*.py"):
++        assert not pattern.search(path.read_text(encoding="utf-8")), f"possible API key in {path}"
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_eval_metrics.py b/tests/test_eval_metrics.py
+--- a/tests/test_eval_metrics.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_eval_metrics.py	2026-11-17 13:28:17.225978459 +0500
+@@ -0,0 +1,29 @@
++import math
++
++from eval_retrieval import is_relevant, ndcg_at_k, reciprocal_rank, norm
++
++
++def test_is_relevant_ignores_case_and_whitespace():
++    assert is_relevant("The  Gradient\nis the MEASURE of slope", ["gradient is the measure of slope"])
++    assert not is_relevant("something else", ["gradient"])
++    assert norm("Newton’s law") == "newton's law"
++
++
++def test_reciprocal_rank():
++    assert reciprocal_rank([False, False, True]) == 1 / 3
++    assert reciprocal_rank([False, False]) == 0.0
++
++
++def test_ndcg():
++    assert ndcg_at_k([True, False, False], 5) == 1.0
++    assert math.isclose(ndcg_at_k([False, True, False], 5), 1 / math.log2(3))
++    assert ndcg_at_k([False] * 5, 5) == 0.0
++
++
++def test_parse_judge_json_tolerates_fences_and_noise():
++    from eval_generation import parse_judge_json
++
++    assert parse_judge_json('```json\n{"faithful": true, "answers_question": false}\n```') == {
++        "faithful": True, "answers_question": False}
++    assert parse_judge_json("no json here") is None
++    assert parse_judge_json('{"broken": ') is None
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_filters_language.py b/tests/test_filters_language.py
+--- a/tests/test_filters_language.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_filters_language.py	2026-11-17 13:27:48.441058335 +0500
+@@ -0,0 +1,45 @@
++from qa import detect_language, extract_implicit_filters
++from hybrid_search import build_where_clause, tokenize
++
++
++def test_chapter_filter_variants():
++    assert extract_implicit_filters("explain chapter 4")["chapter"] == 4
++    assert extract_implicit_filters("ch. 7 notes")["chapter"] == 7
++    assert extract_implicit_filters("chp 2")["chapter"] == 2
++
++
++def test_question_type_filters():
++    assert extract_implicit_filters("give me MCQs on friction")["question_type"] == "MCQ"
++    assert extract_implicit_filters("show long questions")["question_type"] == "long"
++    assert extract_implicit_filters("show short questions")["question_type"] == "short"
++
++
++def test_plain_word_long_or_short_is_not_a_filter():
++    # regression: "long" / "short" inside a normal question used to force a filter
++    assert extract_implicit_filters("how long does light take to reach earth") is None
++    assert extract_implicit_filters("what is a short circuit") is None
++
++
++def test_question_type_only_from_current_message():
++    f = extract_implicit_filters("chapter 3 mcqs", current_query="explain it simply")
++    assert f == {"chapter": 3}
++
++
++def test_language_detection():
++    assert detect_language("What is Pascal's law?") == "english"
++    assert detect_language("Pascal's law kya hai?") == "hinglish"
++    assert detect_language("mujhe force ke bare mein samjhao aur examples do") == "hinglish"
++    # a single marker inside a long English sentence must not flip the language
++    assert detect_language("Explain why the force on the first body ka is equal and opposite to the second body") == "english"
++
++
++def test_where_clause():
++    assert build_where_clause(None) is None
++    assert build_where_clause({"chapter": 4}) == {"chapter": 4}
++    assert build_where_clause({"chapter": 4, "source_type": "textbook"}) == {
++        "$and": [{"chapter": 4}, {"source_type": "textbook"}]
++    }
++
++
++def test_tokenize_drops_stopwords():
++    assert tokenize("What is the SI unit of force?") == ["si", "unit", "force"]
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_hybrid_search.py b/tests/test_hybrid_search.py
+--- a/tests/test_hybrid_search.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_hybrid_search.py	2026-11-17 13:27:57.556178415 +0500
+@@ -0,0 +1,63 @@
++import config
++
++
++def ids(results):
++    return [r["id"] for r in results]
++
++
++def test_bm25_rescues_exact_keyword_when_dense_gate_rejects_everything(searcher):
++    # dense gate so strict that nothing passes -> only BM25 can find the chunk
++    fixed = searcher.search("zxqvwidget", max_distance=1e-9, bm25_min_score=0)
++    assert ids(fixed) == ["t5"]
++    # the OLD behaviour (BM25 only counts if dense already returned it) finds nothing
++    old = searcher.search("zxqvwidget", max_distance=1e-9, bm25_min_score=0, gate_bm25=True)
++    assert old == []
++
++
++def test_bm25_min_score_blocks_weak_keyword_matches(searcher):
++    assert searcher.search("pressure", max_distance=1e-9, bm25_min_score=1e6) == []
++
++
++def test_modes(searcher):
++    dense = searcher.search("moment arm axis rotation", mode="dense", max_distance=None)
++    bm25 = searcher.search("moment arm axis rotation", mode="bm25", bm25_min_score=0)
++    assert dense[0]["retrieval"]["dense_distance"] is not None and dense[0]["retrieval"]["bm25_score"] is None
++    assert bm25[0]["retrieval"]["bm25_score"] is not None and bm25[0]["retrieval"]["dense_distance"] is None
++    assert dense[0]["id"] == bm25[0]["id"] == "t3"
++
++
++def test_filters_apply_to_both_retrievers(searcher):
++    res = searcher.search("pressure", where_filter={"source_type": "past_paper"}, max_distance=None, bm25_min_score=0)
++    assert res and all(r["metadata"]["source_type"] == "past_paper" for r in res)
++    res = searcher.search("torque", where_filter={"chapter": 4, "source_type": "textbook"}, max_distance=None, bm25_min_score=0)
++    assert ids(res) == ["t3"]
++
++
++def test_results_are_copies_with_retrieval_info(searcher):
++    res = searcher.search("pressure liquid", max_distance=None, bm25_min_score=0)
++    assert "retrieval" in res[0]
++    assert "retrieval" not in searcher.id_to_chunk[res[0]["id"]]  # original untouched
++
++
++def test_out_of_scope_query_returns_nothing_with_default_gates(searcher):
++    assert searcher.search("how to bake a chocolate cake", max_distance=config.MAX_DISTANCE) == []
++
++
++def test_reranker_reorders_and_is_optional(searcher):
++    class ReverseByLength:  # fake cross-encoder: prefers longer text
++        def score(self, query, texts):
++            return [float(len(t)) for t in texts]
++
++    base = searcher.search("pressure", max_distance=None, bm25_min_score=0, n_results=4)
++    searcher._reranker = ReverseByLength()
++    reranked = searcher.search("pressure", max_distance=None, bm25_min_score=0, n_results=4, rerank=True)
++    lengths = [len(r["text"]) for r in reranked]
++    assert lengths == sorted(lengths, reverse=True)
++    assert reranked[0]["retrieval"]["rerank_score"] is not None
++    # the re-ranker looks at a wider candidate pool than the final top-n
++    assert len(reranked) == len(base) == 4
++
++
++def test_old_api_still_works(searcher):
++    assert searcher.hybrid_search("torque moment arm", n_results=2, max_distance=None)
++    assert isinstance(searcher.vector_search("torque", max_distance=None)[0], str)
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_llm_live.py b/tests/test_llm_live.py
+--- a/tests/test_llm_live.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_llm_live.py	2026-11-17 13:27:48.452980464 +0500
+@@ -0,0 +1,26 @@
++"""Live tests against Gemini. Skipped unless RUN_LLM_TESTS=1 (they use API quota)."""
++import os
++
++import pytest
++
++pytestmark = [
++    pytest.mark.llm,
++    pytest.mark.skipif(os.getenv("RUN_LLM_TESTS") != "1", reason="set RUN_LLM_TESTS=1 to run live LLM tests"),
++]
++
++
++def test_in_scope_answer_is_grounded_and_cited():
++    import qa
++
++    answer, chunks = qa.ask("What is Pascal's law?")
++    assert chunks, "expected retrieved context"
++    assert "[Source" in answer
++
++
++@pytest.mark.parametrize("q", ["What is the theory of general relativity?", "Explain black holes", "What is dark matter?"])
++def test_out_of_scope_is_refused(q):
++    import qa
++
++    answer, chunks = qa.ask(q)
++    refusal_markers = ("not found", "nahi mila", "could not find", "not cover", "does not", "do not", "doesn't", "not mentioned", "not available")
++    assert not chunks or any(m in answer.lower() for m in refusal_markers)
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' a/tests/test_qa_pipeline.py b/tests/test_qa_pipeline.py
+--- a/tests/test_qa_pipeline.py	1970-01-01 05:00:00.000000000 +0500
++++ b/tests/test_qa_pipeline.py	2026-11-17 13:29:58.631727928 +0500
+@@ -0,0 +1,88 @@
++import qa
++from conftest import make_chunk
++
++
++class FakeSearcher:
++    """Returns canned results and records how it was called."""
++
++    def __init__(self, filtered=None, unfiltered=None):
++        self.filtered, self.unfiltered, self.calls = filtered or [], unfiltered or [], []
++
++    def search(self, query, n_results=5, where_filter=None, max_distance=None, **kw):
++        self.calls.append({"q": query, "n": n_results, "filter": where_filter, "gate": max_distance})
++        return self.filtered if where_filter else self.unfiltered
++
++
++CH = [make_chunk("t1", "Pressure is force per unit area", chapter=6, page=132)]
++
++
++def test_source_labels_and_footer():
++    pp = make_chunk("p1", "Define torque.", source_type="past_paper", year=2024, group="I",
++                    paper_type="subjective", question_type="short")
++    footer = qa.format_sources(CH + [pp])
++    assert "1. Textbook, Chapter 6, Page 132" in footer
++    assert "2. Past Paper 2024 Group I (subjective, short)" in footer
++    assert qa.format_sources([]) == ""
++
++
++def test_prompt_demands_citations_and_mcq_label():
++    p = qa.build_prompt("q", qa.format_context(CH))
++    assert "[Source n]" in p and "solved by tutor" in p and "[Source 1" in p
++
++
++def test_prepare_not_found_has_no_prompt():
++    p = qa.prepare("What is dark matter?", searcher=FakeSearcher())
++    assert p.chunks == [] and p.prompt == ""
++
++
++def test_distance_gate_depends_on_the_kind_of_filter():
++    s = FakeSearcher(unfiltered=CH, filtered=CH)
++    qa.prepare("What is pressure?", searcher=s)
++    assert s.calls[-1]["gate"] == qa.config.MAX_DISTANCE                # open question: strict
++    qa.prepare("explain pressure", where_filter={"chapter": 6}, searcher=s)
++    assert s.calls[-1]["gate"] == qa.config.RELAXED_MAX_DISTANCE        # chapter filter: relaxed, NOT removed
++    qa.prepare("Show MCQs from chapter 6", searcher=s)
++    assert s.calls[-1]["filter"] == {"chapter": 6, "question_type": "MCQ"}
++    assert s.calls[-1]["gate"] is None                                  # browse request: ranking only
++
++
++def test_prepare_falls_back_to_unfiltered_search():
++    s = FakeSearcher(filtered=[], unfiltered=CH)
++    p = qa.prepare("explain pressure", where_filter={"chapter": 2}, searcher=s)
++    assert p.chunks == CH
++    assert [c["filter"] for c in s.calls] == [{"chapter": 2}, None]
++    assert s.calls[-1]["gate"] == qa.config.MAX_DISTANCE
++
++
++def test_list_all_requests_widen_retrieval():
++    s = FakeSearcher(unfiltered=CH, filtered=CH)
++    qa.prepare("give me all mcqs of 2024", searcher=s)
++    assert s.calls[0]["n"] == 25
++
++
++def test_not_found_message_follows_the_students_language():
++    assert qa.NOT_FOUND["hinglish"].startswith("Ye topic")
++    assert qa.NOT_FOUND["english"].startswith("I could not find")
++
++
++def test_ask_with_monkeypatched_llm(monkeypatch):
++    monkeypatch.setattr(qa, "get_searcher", lambda: FakeSearcher(unfiltered=CH))
++    monkeypatch.setattr(qa, "_generate", lambda prompt, retries=3: "Pressure is force per area [Source 1].")
++    answer, chunks = qa.ask("What is pressure?")
++    assert "[Source 1]" in answer and chunks == CH
++
++
++def test_rewrite_is_skipped_for_standalone_english(monkeypatch):
++    def boom(*a, **k):
++        raise AssertionError("LLM must not be called")
++
++    monkeypatch.setattr(qa, "_generate", boom)
++    assert qa.rewrite_query("What is pressure?", None, "english") == "What is pressure?"
++
++
++def test_rewrite_falls_back_to_original_on_failure(monkeypatch):
++    def boom(*a, **k):
++        raise RuntimeError("quota")
++
++    monkeypatch.setattr(qa, "_generate", boom)
++    assert qa.rewrite_query("pressure kya hai", None, "hinglish") == "pressure kya hai"

@@ -1,0 +1,143 @@
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' t3/important.py t3b/important.py
+--- t3/important.py	2026-11-17 17:56:23.802429153 +0500
++++ t3b/important.py	2026-11-17 17:56:55.653277526 +0500
+@@ -84,7 +84,9 @@
+ 
+ 
+ def group_questions(chunks, threshold=JACCARD_THRESHOLD):
+-    """Greedy clustering of near-identical questions of the same type.
++    """Greedy clustering of near-identical questions (question types are NOT separated:
++    "Define latent heat of fusion" as a short question in one paper and as a long question
++    in another is one repeated topic).
+ 
+     Returns a list of dicts {text, question_type, papers:set, chunk_ids} sorted by the
+     number of distinct papers (most repeated first).
+@@ -94,14 +96,17 @@
+         m = c["metadata"]
+         toks = _tokens(c["text"])
+         for g in groups:
+-            if g["question_type"] == m.get("question_type") and jaccard(toks, g["tokens"]) >= threshold:
++            if jaccard(toks, g["tokens"]) >= threshold:
+                 g["papers"].add(paper_key(m))
+                 g["chunk_ids"].append(c["id"])
++                g["types"].add(m.get("question_type"))
++                g["by_paper"].setdefault(paper_key(m), set()).add(m.get("question_type"))
+                 break
+         else:
+             groups.append({
+                 "text": clean_question(c["text"]), "question_type": m.get("question_type"),
+                 "tokens": toks, "papers": {paper_key(m)}, "chunk_ids": [c["id"]],
++                "types": {m.get("question_type")}, "by_paper": {paper_key(m): {m.get("question_type")}},
+             })
+     groups.sort(key=lambda g: (-len(g["papers"]), g["text"]))
+     return groups
+@@ -123,6 +128,9 @@
+         "none_repeated": "No question in this selection repeated across papers.",
+         "thin": "Only {n} past-paper question(s) exist for this selection, so I cannot judge importance from them.",
+         "no_data": "I have no past-paper questions for this selection.",
++        "none_of_type": "No {what} from chapter {ch} appeared in the {n_papers} past papers ({papers}). "
++                        "What this chapter does have: MCQ={mcq}, short={short}, long={long} "
++                        "({n} of {total} past-paper questions, {pct:.1f}%).",
+         "mcq_note": "MCQ answer keys are not available, so these are listed without answers.",
+         "book": "Textbook exercise questions are not counted here - ask for them separately; they are not past-paper evidence.",
+     },
+@@ -137,6 +145,9 @@
+         "none_repeated": "Is selection mein koi sawal papers mein repeat nahi hua.",
+         "thin": "Is selection ke sirf {n} past-paper sawal mere paas hain, is liye importance ka andaza nahi laga sakta.",
+         "no_data": "Is selection ke past-paper sawal mere paas nahi hain.",
++        "none_of_type": "{n_papers} past papers ({papers}) mein chapter {ch} ka koi {what} nahi aaya. "
++                        "Is chapter mein jo aaya: MCQ={mcq}, short={short}, long={long} "
++                        "({n} of {total} past-paper sawal, {pct:.1f}%).",
+         "mcq_note": "MCQs ki answer key maujood nahi, is liye jawab ke baghair likhe hain.",
+         "book": "Textbook ke exercise sawal yahan count nahi hue - woh alag se pooch lo; woh past-paper ka saboot nahi hain.",
+     },
+@@ -144,6 +155,16 @@
+ QTYPE_NAME = {"MCQ": "MCQs", "short": "short questions", "long": "long questions"}
+ 
+ 
++def _fmt(g):
++    papers = []
++    for p in sorted(g["papers"]):
++        tag = ""
++        if len(g["types"]) > 1:   # a topic asked in different forms: say which form each paper used
++            tag = " [" + "/".join(sorted(g["by_paper"][p])) + "]"
++        papers.append(paper_label(p) + tag)
++    return f"- {g['text']} ({', '.join(papers)})"
++
++
+ def answer_important(chunks, chapter=None, question_type=None, language="english"):
+     """Build the full answer text (deterministic, no LLM)."""
+     m = MSG["hinglish" if language == "hinglish" else "english"]
+@@ -153,19 +174,32 @@
+ 
+     sel = select_chunks(chunks, chapter, question_type)
+     if not sel:
++        in_chapter = select_chunks(chunks, chapter, None) if chapter is not None else []
++        if in_chapter and question_type:
++            every = select_chunks(chunks, None, None)
++            pk = papers_available(every)
++            count = lambda t: sum(c["metadata"].get("question_type") == t for c in in_chapter)
++            return title + "\n\n" + m["none_of_type"].format(
++                what=QTYPE_NAME[question_type], ch=chapter, n_papers=len(pk),
++                papers=", ".join(paper_label(p) for p in pk), mcq=count("MCQ"), short=count("short"),
++                long=count("long"), n=len(in_chapter), total=len(every), pct=100 * len(in_chapter) / len(every))
+         return title + "\n\n" + m["no_data"]
++
++    # group across ALL question types of the selection's chapter, then keep the groups that
++    # contain the requested type
++    pool = select_chunks(chunks, chapter, None)
++    groups = group_questions(pool)
++    if question_type:
++        groups = [g for g in groups if question_type in g["types"]]
++
+     if len(sel) < THIN_CHAPTER_CHUNKS:
+         lines = [title, "", m["thin"].format(n=len(sel)), ""]
+-        lines += [f"- {clean_question(c['text'])} ({paper_label(paper_key(c['metadata']))})" for c in sel]
++        lines += [_fmt(g) for g in groups]
+         return "\n".join(lines)
+ 
+-    groups = group_questions(sel)
+     repeated = [g for g in groups if len(g["papers"]) >= MIN_PAPERS_FOR_PATTERN]
+     once = [g for g in groups if len(g["papers"]) < MIN_PAPERS_FOR_PATTERN]
+-
+-    def fmt(g):
+-        papers = ", ".join(paper_label(p) for p in sorted(g["papers"]))
+-        return f"- {g['text']} ({papers})"
++    fmt = _fmt
+ 
+     lines = [title, "", f"**{m['repeated']}**"]
+     lines += [fmt(g) for g in repeated] or [m["none_repeated"]]
+diff -ruN -x __pycache__ -x .pytest_cache -x '*.pyc' t3/tests/test_important_fixes.py t3b/tests/test_important_fixes.py
+--- t3/tests/test_important_fixes.py	1970-01-01 05:00:00.000000000 +0500
++++ t3b/tests/test_important_fixes.py	2026-11-17 17:57:07.782998036 +0500
+@@ -0,0 +1,30 @@
++import important as im
++from test_important_and_sweep import PAPERS, pp
++
++
++def test_empty_type_reports_what_the_chapter_does_have():
++    en = im.answer_important(PAPERS, chapter=9, question_type="MCQ")
++    assert "No MCQs from chapter 9 appeared" in en and "MCQ=0, short=1, long=0" in en
++    hi = im.answer_important(PAPERS, chapter=9, question_type="MCQ", language="hinglish")
++    assert "koi MCQs nahi aaya" in hi and "MCQ=0, short=1, long=0" in hi
++
++
++def test_chapter_with_no_questions_at_all_keeps_the_generic_message():
++    assert "no past-paper questions" in im.answer_important(PAPERS, chapter=7, question_type="MCQ")
++
++
++def test_thin_chapter_merges_the_same_question_asked_in_two_papers():
++    data = PAPERS + [pp("b2", "Define plasma physics.", chapter=9, year=2023, group="II")]
++    text = im.answer_important(data, chapter=9, question_type="short")
++    assert text.count("Define plasma physics.") == 1
++    assert "Define plasma physics. (2023 Gp I, 2023 Gp II)" in text
++
++
++def test_topic_asked_as_short_and_long_counts_as_one_repeat():
++    data = [
++        pp("s1", "Define latent heat of fusion.", chapter=7, qtype="short", year=2024, group="II"),
++        pp("l1", "Define and explain latent heat of fusion. 4", chapter=7, qtype="long", year=2023, group="I"),
++    ] + [pp(f"x{i}", f"Filler question number {i} about heat.", chapter=7, year=2023, group="I") for i in range(5)]
++    text = im.answer_important(data, chapter=7)   # all types of the chapter
++    assert "Repeated" in text
++    assert "(2023 Gp I [long], 2024 Gp II [short])" in text

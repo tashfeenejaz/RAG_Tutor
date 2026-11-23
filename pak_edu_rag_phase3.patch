@@ -1,0 +1,352 @@
+diff --git a/README.md b/README.md
+index 9464d9a..21bf7b6 100644
+--- a/README.md
++++ b/README.md
+@@ -109,20 +109,38 @@ from 0.17 to 0.50. P@5 cannot exceed 0.20 when a query has one relevant chunk.
+ 
+ A chunk is returned only if it passes the gates in `config.py`:
+ 
+-| Setting | Meaning |
+-|---|---|
+-| `MAX_DISTANCE` | dense distance gate for open questions |
+-| `BM25_SOLO_MIN_SCORE` (default 12) | a chunk found *only* by BM25 needs this score; chunks dense also returned need any positive score. Raw BM25 scores of out-of-scope questions reach 11.4 and overlap real hits (6-12), so a single low floor cannot separate them |
+-| `RERANK_MIN_SCORE` (default off) | cross-encoder cutoff; not applied to "browse" requests (question-type filter) |
+-
+-`python eval_sweep.py` caches embeddings and re-ranker scores, sweeps the three gates, and
+-prints the best MRR whose false-retrieval rate is <= `--max-false-rate` (default 0.17),
+-plus the `.env` lines to use. The gold set is both tuning and report set, so quote the swept
+-numbers only after adding new, unseen queries.
+-
+-`python eval_retrieval.py --misses` writes `eval/results/misses.md`: for every missed query,
+-whether the gold phrase is in any chunk at all, where the gold chunk ranks, and what was
+-retrieved instead.
++| Setting | Default | Meaning |
++|---|---|---|
++| `MAX_DISTANCE` | 0.55 | dense distance gate for open questions |
++| `BM25_SOLO_MIN_SCORE` | 6 | a chunk found *only* by BM25 needs this score when the re-ranker runs; chunks dense also returned need any positive score |
++| `BM25_SOLO_MIN_SCORE_NO_RERANK` | 12 | stricter bar when the re-ranker is off or unavailable (with 6 and no re-ranker, 6 of 12 out-of-scope queries retrieved something) |
++| `RERANK_MIN_SCORE` | -8.6 | cross-encoder cutoff, tuned for `Xenova/ms-marco-MiniLM-L-6-v2` only; off if `RERANK_MODEL` is overridden. Not applied to "browse" requests (question-type filter) |
++
++The defaults are the pick of `eval_sweep.py` on the 78-query gold set. In that sweep the top
++settings were within about 0.03 MRR of each other, i.e. a plateau, and the gold set is both
++tuning and report set, so treat the numbers as optimistic. Re-run the sweep whenever the models
++or the gold set change.
++
++`python eval_sweep.py` caches embeddings and re-ranker scores, sweeps the gates, and prints the
++best MRR whose false-retrieval rate is <= `--max-false-rate` (default 0.17), plus the `.env`
++lines.
++
++### Held-out check
++
++`eval/heldout_set.jsonl` has 34 answerable and 8 out-of-scope queries that were *not* used for
++tuning (no shared queries or answer phrases with the gold set; enforced by a test). Report these
++numbers, not the sweep numbers:
++
++```bash
++python eval_retrieval.py --translate --gold eval/heldout_set.jsonl --out eval/results/heldout
++```
++
++### Diagnosing misses
++
++`python eval_retrieval.py --misses` writes `eval/results/misses.md`: counts of misses by cause
++(`gold` = answer phrase in no chunk, `ranking` = relevant chunk in the top-20 but not top-5,
++`gate` = not in the top-20), the re-ranker/BM25/dense scores of the gold chunk, and every
++out-of-scope query that still retrieved something.
+ 
+ ### "Important questions"
+ 
+diff --git a/config.py b/config.py
+index 44ff81f..45f647a 100644
+--- a/config.py
++++ b/config.py
+@@ -34,18 +34,27 @@ USE_RERANKER = os.getenv("USE_RERANKER", "1") not in ("0", "false", "False", "")
+ # ---------------------------------------------------------------- retrieval
+ # Chroma distance here is squared-L2 on normalised BGE vectors (Chroma default),
+ # i.e. cosine_distance = distance / 2. Lower is better.
+-MAX_DISTANCE = 0.65            # strict gate used for open questions
++MAX_DISTANCE = 0.55            # strict gate for open questions (swept: 0.50-0.70 within noise, 0.55 picked)
+ RELAXED_MAX_DISTANCE = 0.85    # used when the user filters by question type ("list all MCQs ...")
+ BM25_MIN_SCORE = float(os.getenv("BM25_MIN_SCORE", "6.0"))  # BM25-only candidates must reach this score
+ # In hybrid mode a chunk that ONLY BM25 found (dense did not return it) must reach this
+ # higher score. Chunks both retrievers agree on are accepted at any positive BM25 score.
+-# Raw BM25 scores of out-of-scope questions overlap with real hits at 6-11 (measured on
+-# the gold set), so the solo bar sits above that range. Tune with eval_sweep.py.
+-BM25_SOLO_MIN_SCORE = float(os.getenv("BM25_SOLO_MIN_SCORE", "12.0"))
++# Raw BM25 scores of out-of-scope questions overlap with real hits (6-11), so the bar alone
++# does not separate them; with dense-support chunks exempt, eval_sweep.py picked 6. Re-tune
++# with eval_sweep.py whenever the gold set or the models change.
++BM25_SOLO_MIN_SCORE = float(os.getenv("BM25_SOLO_MIN_SCORE", "6.0"))   # used together with the re-ranker
++# Without the re-ranker nothing else filters weak BM25-only chunks (solo 6 gave 50% false
++# retrieval in the ablation), so a stricter bar applies.
++BM25_SOLO_MIN_SCORE_NO_RERANK = float(os.getenv("BM25_SOLO_MIN_SCORE_NO_RERANK", "12.0"))
+ # Cross-encoder cutoff: re-ranked chunks scoring below this are dropped (None = off).
+-# Tune with eval_sweep.py; not applied to "browse" requests (question-type filter).
++# The default (-8.6) was picked by eval_sweep.py for Xenova/ms-marco-MiniLM-L-6-v2 and is
++# meaningless for any other model, so it only applies when RERANK_MODEL is not overridden
++# (set RERANK_MIN_SCORE explicitly if you change the model). Not applied to "browse" requests.
+ _rr = os.getenv("RERANK_MIN_SCORE", "").strip()
+-RERANK_MIN_SCORE = float(_rr) if _rr else None
++if _rr:
++    RERANK_MIN_SCORE = float(_rr)
++else:
++    RERANK_MIN_SCORE = None if os.getenv("RERANK_MODEL") else -8.6
+ CANDIDATES = 20                # candidates taken from each retriever before fusion
+ RRF_K = 60
+ RERANK_CANDIDATES = 15         # how many fused candidates go to the cross-encoder
+diff --git a/eval/heldout_set.jsonl b/eval/heldout_set.jsonl
+new file mode 100644
+index 0000000..1432c66
+--- /dev/null
++++ b/eval/heldout_set.jsonl
+@@ -0,0 +1,42 @@
++{"id": "h001", "type": "definition", "query": "What is translatory motion?", "answer_phrases": ["it is called translatory motion"], "filter": null, "should_refuse": false}
++{"id": "h002", "type": "definition", "query": "What is circular motion?", "answer_phrases": ["The motion of a body along a circle is called circular motion"], "filter": null, "should_refuse": false}
++{"id": "h003", "type": "definition", "query": "What is rotatory motion?", "answer_phrases": ["the motion of this body is called rotatory motion"], "filter": null, "should_refuse": false}
++{"id": "h004", "type": "definition", "query": "What is vibratory motion?", "answer_phrases": ["the motion is called vibratory motion"], "filter": null, "should_refuse": false}
++{"id": "h005", "type": "definition", "query": "Define speed.", "answer_phrases": ["Distance covered by a body in a unit time is called its speed"], "filter": null, "should_refuse": false}
++{"id": "h006", "type": "definition", "query": "What is instantaneous speed?", "answer_phrases": ["is called instantaneous speed"], "filter": null, "should_refuse": false}
++{"id": "h007", "type": "definition", "query": "What is a distance-time graph?", "answer_phrases": ["is called a distance-time graph"], "filter": null, "should_refuse": false}
++{"id": "h008", "type": "definition", "query": "What is muzzle velocity?", "answer_phrases": ["is called the muzzle velocity of the gun"], "filter": null, "should_refuse": false}
++{"id": "h009", "type": "definition", "query": "Define inertia.", "answer_phrases": ["to maintain its state of rest or of uniform motion in a straight line is called inertia"], "filter": null, "should_refuse": false}
++{"id": "h010", "type": "definition", "query": "What is terminal velocity?", "answer_phrases": ["is called its terminal velocity"], "filter": null, "should_refuse": false}
++{"id": "h011", "type": "definition", "query": "What is limiting friction?", "answer_phrases": ["The maximum value of the static friction is called limiting friction"], "filter": null, "should_refuse": false}
++{"id": "h012", "type": "definition", "query": "What is impulse of a force?", "answer_phrases": ["is called as Impulse of the force"], "filter": null, "should_refuse": false}
++{"id": "h013", "type": "definition", "query": "What are parallel forces?", "answer_phrases": ["are known as parallel forces"], "filter": null, "should_refuse": false}
++{"id": "h014", "type": "definition", "query": "What is the line of action of a force?", "answer_phrases": ["The line along which the force acts is called the line of action of the force"], "filter": null, "should_refuse": false}
++{"id": "h015", "type": "definition", "query": "Define potential energy.", "answer_phrases": ["the energy that a body possesses by virtue of its position or deformation"], "filter": null, "should_refuse": false}
++{"id": "h016", "type": "definition", "query": "What is the efficiency of a working system?", "answer_phrases": ["is called the efficiency of a working system"], "filter": null, "should_refuse": false}
++{"id": "h017", "type": "definition", "query": "Define density.", "answer_phrases": ["Density of a substance is defined as its mass per unit volume"], "filter": null, "should_refuse": false}
++{"id": "h018", "type": "definition", "query": "What are barometers?", "answer_phrases": ["are called barometers"], "filter": null, "should_refuse": false}
++{"id": "h019", "type": "definition", "query": "What is plasma called?", "answer_phrases": ["known as fourth state of matter"], "filter": null, "should_refuse": false}
++{"id": "h020", "type": "paraphrase", "query": "Which instrument measures atmospheric pressure?", "answer_phrases": ["Instruments which measure the atmospheric pressure are called barometers"], "filter": null, "should_refuse": false}
++{"id": "h021", "type": "paraphrase", "query": "What name is given to the ratio of useful output energy to the total input energy?", "answer_phrases": ["is called the efficiency of a working system"], "filter": null, "should_refuse": false}
++{"id": "h022", "type": "paraphrase", "query": "What is the name of the energy released by breaking the nucleus of an atom?", "answer_phrases": ["is known as nuclear energy"], "filter": null, "should_refuse": false}
++{"id": "h023", "type": "paraphrase", "query": "How is the instantaneous speed of a vehicle shown?", "answer_phrases": ["shown by its speedometer at any instant"], "filter": null, "should_refuse": false}
++{"id": "h024", "type": "paraphrase", "query": "A body that does not change its position with respect to its surroundings is in which state?", "answer_phrases": ["it is said to be at rest"], "filter": null, "should_refuse": false}
++{"id": "h025", "type": "paraphrase", "query": "What is the SI unit of pressure called?", "answer_phrases": ["is called pascal (Pa)"], "filter": null, "should_refuse": false}
++{"id": "h026", "type": "hinglish", "query": "Resultant force kya hota hai?", "answer_phrases": ["is known as resultant force"], "filter": null, "should_refuse": false}
++{"id": "h027", "type": "hinglish", "query": "Elastic potential energy kya hai?", "answer_phrases": ["is known as elastic potential energy"], "filter": null, "should_refuse": false}
++{"id": "h028", "type": "hinglish", "query": "Nuclear energy kise kehte hain?", "answer_phrases": ["energy released by breaking the nucleus of an atom is known as nuclear energy"], "filter": null, "should_refuse": false}
++{"id": "h029", "type": "hinglish", "query": "Internal energy kya hoti hai?", "answer_phrases": ["is called its internal energy"], "filter": null, "should_refuse": false}
++{"id": "h030", "type": "hinglish", "query": "Ferromagnetic materials kya hote hain?", "answer_phrases": ["are called ferromagnetic materials"], "filter": null, "should_refuse": false}
++{"id": "h031", "type": "definition", "query": "What is a non-contact force?", "answer_phrases": ["is defined as the force between two objects which are not in physical contact"], "filter": null, "should_refuse": false}
++{"id": "h032", "type": "definition", "query": "What are renewable energy sources?", "answer_phrases": ["are called renewable energy source"], "filter": null, "should_refuse": false}
++{"id": "h033", "type": "definition", "query": "What is gravitational potential energy?", "answer_phrases": ["is known as gravitational potential energy"], "filter": null, "should_refuse": false}
++{"id": "h034", "type": "definition", "query": "What are magnetic materials?", "answer_phrases": ["are called magnetic materials"], "filter": null, "should_refuse": false}
++{"id": "ho01", "type": "out_of_scope", "query": "How do vaccines work?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho02", "type": "out_of_scope", "query": "Who wrote the play Hamlet?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho03", "type": "out_of_scope", "query": "What is the function of mitochondria?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho04", "type": "out_of_scope", "query": "Give me a recipe for biryani", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho05", "type": "out_of_scope", "query": "What is GDP?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho06", "type": "out_of_scope", "query": "Who built the Badshahi Mosque?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho07", "type": "out_of_scope", "query": "What is Schrodinger's equation?", "answer_phrases": [], "filter": null, "should_refuse": true}
++{"id": "ho08", "type": "out_of_scope", "query": "Explain the working of a transistor", "answer_phrases": [], "filter": null, "should_refuse": true}
+diff --git a/eval_retrieval.py b/eval_retrieval.py
+index cb98a6f..62a11e2 100644
+--- a/eval_retrieval.py
++++ b/eval_retrieval.py
+@@ -132,13 +132,15 @@ def evaluate(searcher, gold, k=5, queries=None, **search_kwargs):
+     def mean(rs, key):
+         return sum(float(r[key]) for r in rs) / len(rs) if rs else float("nan")
+ 
+-    false_retrievals = 0
++    false_retrievals, false_ids = 0, []
+     for g in refusals:
+         chunks = searcher.search(
+             queries.get(g["id"], g["query"]), n_results=k, where_filter=g.get("filter"),
+             max_distance=effective_gate(g.get("filter")), **search_kwargs,
+         )
+         false_retrievals += bool(chunks)
++        if chunks:
++            false_ids.append(g["id"])
+ 
+     summary = {
+         "n_answerable": len(answerable),
+@@ -151,6 +153,7 @@ def evaluate(searcher, gold, k=5, queries=None, **search_kwargs):
+         f"hit@{k}_ci": bootstrap_ci([r["hit@k"] for r in rows]),
+         f"mrr@{k}_ci": bootstrap_ci([r["mrr"] for r in rows]),
+         "false_retrieval_count": false_retrievals,
++        "false_retrieval_queries": false_ids,
+         "n_out_of_scope": len(refusals),
+         "false_retrieval_rate": (false_retrievals / len(refusals)) if refusals else float("nan"),
+         "by_type": {t: {f"hit@{k}": mean(rs, "hit@k"), f"mrr@{k}": mean(rs, "mrr"), "n": len(rs)}
+@@ -191,10 +194,24 @@ def translated_queries(gold, cache_path):
+     return out
+ 
+ 
+-def misses_report(searcher, gold, rows, k, queries, search_kwargs):
+-    """Markdown explaining each query the configuration missed."""
++def classify_miss(rel, rank):
++    """Why a query missed: gold | ranking | gate."""
++    if not rel:
++        return "gold"
++    return "ranking" if rank else "gate"
++
++
++def misses_report(searcher, gold, rows, k, queries, search_kwargs, false_ids=()):
++    """Markdown: counts per miss cause, every missed query, and the out-of-scope queries
++    that still retrieved something."""
+     by_id = {g["id"]: g for g in gold}
+-    out = ["# Retrieval misses (final configuration)\n"]
++    notes = {
++        "gold": "GOLD PROBLEM: the answer phrase is in no chunk (re-chunking cut it, or the phrase is wrong)",
++        "ranking": "ranking problem: the relevant chunk is in the top-20 but not in the top-{k}",
++        "gate": "gate/retrieval problem: the relevant chunk is not in the top-20 (a gate removed it or "
++                "neither retriever found it)",
++    }
++    blocks, causes = [], defaultdict(list)
+     for r in rows:
+         if r["hit@k"]:
+             continue
+@@ -203,25 +220,45 @@ def misses_report(searcher, gold, rows, k, queries, search_kwargs):
+         rel = relevant_ids(searcher.all_chunks, g["answer_phrases"])
+         deep = searcher.search(q, n_results=20, where_filter=g.get("filter"),
+                                max_distance=effective_gate(g.get("filter")), **search_kwargs)
+-        rank = next((i for i, c in enumerate(deep, 1) if c["id"] in rel), None)
+-        if not rel:
+-            verdict = "GOLD PROBLEM: answer phrase is in no chunk (re-chunking cut it, or the phrase is wrong)"
+-        elif rank:
+-            verdict = f"ranking problem: relevant chunk is at rank {rank} of the top-20"
+-        else:
+-            verdict = "retrieval/gate problem: relevant chunk not in the top-20 (or filtered out by a gate)"
+-        out.append(f"## {g['id']} [{g['type']}] {g['query']}")
++        pos = next((i for i, c in enumerate(deep, 1) if c["id"] in rel), None)
++        cause = classify_miss(rel, pos)
++        causes[cause].append(g["id"])
++        out = [f"## {g['id']} [{g['type']}] {g['query']}"]
+         if q != g["query"]:
+             out.append(f"_translated to:_ {q}")
+         out.append(f"- gold phrase: `{g['answer_phrases'][0][:120]}`")
+         out.append(f"- chunks containing it: {sorted(rel) or 'none'}")
+-        out.append(f"- **{verdict}**")
++        out.append(f"- **{notes[cause].format(k=k)}**")
++        if pos:
++            ri = deep[pos - 1]["retrieval"]
++            out.append(f"- gold chunk rank {pos}: rerank_score={ri.get('rerank_score')}, "
++                       f"bm25={ri.get('bm25_score')}, dense_distance={ri.get('dense_distance')}")
+         for i, c in enumerate(deep[:3], 1):
+             m = c["metadata"]
+             out.append(f"  {i}. {c['id']} ch{m.get('chapter')} p{m.get('page')} - "
+                        f"{c['text'][:110].replace(chr(10), ' ')}")
+-        out.append("")
+-    return "\n".join(out)
++        blocks.append("\n".join(out))
++
++    n = sum(len(v) for v in causes.values())
++    head = ["# Retrieval misses (final configuration)", "",
++            f"{n} answerable queries missed in the top-{k}: "
++            + ", ".join(f"{c} = {len(causes[c])}" for c in ("gold", "ranking", "gate")), ""]
++    for c in ("gold", "ranking", "gate"):
++        if causes[c]:
++            head.append(f"- {c}: {', '.join(causes[c])}")
++    tail = ["", "# Out-of-scope queries that still retrieved something", ""]
++    for gid in false_ids:
++        g = by_id[gid]
++        res = searcher.search(queries.get(gid, g["query"]), n_results=k, where_filter=g.get("filter"),
++                              max_distance=effective_gate(g.get("filter")), **search_kwargs)
++        top = res[0]
++        ri = top["retrieval"]
++        tail.append(f"- {gid} {g['query']!r} -> {top['id']} (rerank={ri.get('rerank_score')}, "
++                    f"bm25={ri.get('bm25_score')}, dense={ri.get('dense_distance')}): "
++                    f"{top['text'][:100].replace(chr(10), ' ')}")
++    if not false_ids:
++        tail.append("none")
++    return "\n".join(head) + "\n\n" + "\n\n".join(blocks) + "\n" + "\n".join(tail) + "\n"
+ 
+ 
+ def main():
+@@ -259,7 +296,8 @@ def main():
+     if args.misses:
+         final = FINAL_CONFIG if FINAL_CONFIG in details else names[-1]
+         (out / "misses.md").write_text(
+-            misses_report(searcher, gold, details[final], args.k, queries, CONFIGS[final]), encoding="utf-8")
++            misses_report(searcher, gold, details[final], args.k, queries, CONFIGS[final],
++                          results[final]["false_retrieval_queries"]), encoding="utf-8")
+         print(f"Saved {out/'misses.md'} ({final})")
+     (out / "ablation.md").write_text(table + "\n", encoding="utf-8")
+     (out / "ablation.json").write_text(
+diff --git a/hybrid_search.py b/hybrid_search.py
+index 94b0b3e..9729035 100644
+--- a/hybrid_search.py
++++ b/hybrid_search.py
+@@ -206,6 +206,8 @@ class HybridSearcher:
+         bm25_min_score       floor for BM25-only mode and for the old gated hybrid.
+         bm25_solo_min_score  hybrid mode: a chunk found ONLY by BM25 needs this score;
+                              chunks the dense retriever also returned need any score > 0.
++                             None = config.BM25_SOLO_MIN_SCORE when the re-ranker runs,
++                             config.BM25_SOLO_MIN_SCORE_NO_RERANK when it does not.
+         rerank_min_score     drop re-ranked chunks below this cross-encoder score
+                              (only when the re-ranker actually ran; None = no cutoff).
+         """
+@@ -215,11 +217,15 @@ class HybridSearcher:
+ 
+         if mode in ("hybrid", "dense"):
+             dense = self.dense_candidates(query, where_filter=where_filter, max_distance=max_distance)
++        use_rerank = self._use_reranker if rerank is None else rerank
++        rerank_active = bool(use_rerank and mode != "bm25" and self.reranker is not None)
+         dense_dist = dict(dense)
+         if mode == "bm25" or (mode == "hybrid" and gate_bm25):
+             sparse = self.bm25_candidates(query, where_filter=where_filter, min_score=bm25_min)
+         elif mode == "hybrid":
+-            solo_min = config.BM25_SOLO_MIN_SCORE if bm25_solo_min_score is None else bm25_solo_min_score
++            solo_min = bm25_solo_min_score
++            if solo_min is None:  # the re-ranker is what filters weak BM25-only chunks; without it be stricter
++                solo_min = config.BM25_SOLO_MIN_SCORE if rerank_active else config.BM25_SOLO_MIN_SCORE_NO_RERANK
+             sparse = self.bm25_candidates(query, where_filter=where_filter)
+             sparse = [(cid, s) for cid, s in sparse if cid in dense_dist or s >= solo_min]
+         bm25_score = dict(sparse)
+@@ -234,7 +240,6 @@ class HybridSearcher:
+ 
+         ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+ 
+-        use_rerank = self._use_reranker if rerank is None else rerank
+         rerank_scores = {}
+         if use_rerank and ranked:
+             reranker = self.reranker
+diff --git a/tests/test_data_and_gold.py b/tests/test_data_and_gold.py
+index 5c31f90..75d21ec 100644
+--- a/tests/test_data_and_gold.py
++++ b/tests/test_data_and_gold.py
+@@ -48,3 +48,19 @@ def test_no_secrets_in_source_files():
+     pattern = re.compile(r"AIza[0-9A-Za-z_-]{20,}|AQ\.[A-Za-z0-9_-]{20,}")
+     for path in pathlib.Path(".").glob("*.py"):
+         assert not pattern.search(path.read_text(encoding="utf-8")), f"possible API key in {path}"
++
++
++HELDOUT = "eval/heldout_set.jsonl"
++
++
++@needs_data
++def test_heldout_set_is_valid_and_does_not_overlap_the_tuning_set():
++    held, dev = load_gold(HELDOUT), load_gold()
++    chunks = load(config.TEXTBOOK_CHUNKS) + load(config.PAST_PAPER_CHUNKS)
++    assert len({g["id"] for g in held}) == len(held) and not {g["id"] for g in held} & {g["id"] for g in dev}
++    assert any(g.get("should_refuse") for g in held)
++    answerable = [g for g in held if not g.get("should_refuse")]
++    assert all(any(is_relevant(c["text"], g["answer_phrases"]) for c in chunks) for g in answerable)
++    dev_phrases = {p.lower() for g in dev for p in g["answer_phrases"]}
++    assert not [g["id"] for g in answerable if any(p.lower() in dev_phrases for p in g["answer_phrases"])]
++    assert not {g["query"].lower() for g in held} & {g["query"].lower() for g in dev}
+diff --git a/tests/test_hybrid_search.py b/tests/test_hybrid_search.py
+index b5323c6..e110db5 100644
+--- a/tests/test_hybrid_search.py
++++ b/tests/test_hybrid_search.py
+@@ -84,3 +84,18 @@ def test_rerank_min_score_drops_weak_chunks_only_when_reranker_ran(searcher):
+     assert searcher.search("pressure", max_distance=None, rerank=True, rerank_min_score=1e9) == []
+     # reranker off -> the cutoff is ignored (there are no cross-encoder scores to compare)
+     assert searcher.search("pressure", max_distance=None, rerank=False, rerank_min_score=1e9)
++
++
++def test_default_solo_bar_is_stricter_without_the_reranker(searcher, monkeypatch):
++    monkeypatch.setattr(config, "BM25_SOLO_MIN_SCORE", 0.0)
++    monkeypatch.setattr(config, "BM25_SOLO_MIN_SCORE_NO_RERANK", 1e9)
++
++    class Fake:
++        def score(self, query, texts):
++            return [1.0] * len(texts)
++
++    # no re-ranker: strict bar, BM25 cannot rescue anything when the dense gate is closed
++    assert searcher.search("zxqvwidget", max_distance=1e-9, rerank=False) == []
++    # re-ranker available: the lenient bar applies (the re-ranker is the safety net)
++    searcher._reranker = Fake()
++    assert ids(searcher.search("zxqvwidget", max_distance=1e-9, rerank=True)) == ["t5"]

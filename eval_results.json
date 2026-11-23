@@ -1,0 +1,262 @@
+[
+  {
+    "query": "What is the SI unit of force?",
+    "expected_chapter": 3,
+    "retrieved_chapters": [
+      1,
+      1,
+      3,
+      2,
+      5
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": false
+  },
+  {
+    "query": "Define least count of a measuring instrument",
+    "expected_chapter": 1,
+    "retrieved_chapters": [
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is Pascal's law?",
+    "expected_chapter": 6,
+    "retrieved_chapters": [
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Explain Newton's third law of motion",
+    "expected_chapter": 3,
+    "retrieved_chapters": [
+      3,
+      3,
+      3,
+      3,
+      3
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is centripetal force?",
+    "expected_chapter": 4,
+    "retrieved_chapters": [
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Define kinetic energy",
+    "expected_chapter": 5,
+    "retrieved_chapters": [
+      5,
+      5,
+      9,
+      7,
+      5
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is terminal velocity?",
+    "expected_chapter": 3,
+    "retrieved_chapters": [
+      3,
+      3,
+      2,
+      3,
+      2
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Explain the difference between distance and displacement",
+    "expected_chapter": 2,
+    "retrieved_chapters": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is specific heat?",
+    "expected_chapter": 7,
+    "retrieved_chapters": [
+      7,
+      7,
+      7,
+      7,
+      7
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Define magnetic field",
+    "expected_chapter": 8,
+    "retrieved_chapters": [
+      8,
+      8,
+      8,
+      8,
+      9
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is centre of gravity?",
+    "expected_chapter": 4,
+    "retrieved_chapters": [
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "State the principle of conservation of momentum",
+    "expected_chapter": 3,
+    "retrieved_chapters": [
+      3,
+      3,
+      3,
+      5,
+      3
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is Hooke's law?",
+    "expected_chapter": 6,
+    "retrieved_chapters": [
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Define scalar and vector quantities",
+    "expected_chapter": 2,
+    "retrieved_chapters": [
+      2,
+      2,
+      2,
+      2,
+      1
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is atmospheric pressure?",
+    "expected_chapter": 6,
+    "retrieved_chapters": [
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Explain absolute zero temperature",
+    "expected_chapter": 7,
+    "retrieved_chapters": [
+      7,
+      7,
+      7,
+      7,
+      7
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What are ferromagnetic materials?",
+    "expected_chapter": 8,
+    "retrieved_chapters": [
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Define power and its SI unit",
+    "expected_chapter": 5,
+    "retrieved_chapters": [
+      5,
+      1,
+      5,
+      1,
+      5
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "What is the scientific method?",
+    "expected_chapter": 9,
+    "retrieved_chapters": [
+      9,
+      9,
+      9,
+      9,
+      9
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  },
+  {
+    "query": "Explain torque or moment of a force",
+    "expected_chapter": 4,
+    "retrieved_chapters": [
+      4,
+      4,
+      4,
+      4,
+      9
+    ],
+    "hit_in_top_n": true,
+    "hit_at_1": true
+  }
+]

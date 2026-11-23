@@ -1,0 +1,26 @@
+# secrets
+.env
+*.key
+
+# environments / caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# generated artefacts (rebuild with: python build_vectordb.py)
+chroma_db/
+eval/results/
+
+# source PDFs and page images (large, and copyrighted)
+*.pdf
+*.png
+*.jpg
+
+# --- DATA / COPYRIGHT -------------------------------------------------
+# The OCR text and chunks come from Punjab Textbook Board books and Lahore
+# Board past papers. Before making the repo public, decide whether you are
+# allowed to publish them. To keep them out of git, uncomment:
+# data/
+data/
