@@ -1,6 +1,6 @@
-# Pak Edu RAG — Class 9 Physics Tutor (Lahore Board)
+# RAG  Physics Tutor (Lahore Board)
 
-Pak Edu RAG is a retrieval-augmented study assistant for Class 9 Physics. It answers student questions using the Punjab Textbook Board textbook and Lahore Board past papers included in the project.
+ RAG_Tutor  is a retrieval-augmented study assistant for Class 9 Physics. It answers student questions using the Punjab Textbook Board textbook and Lahore Board past papers included in the project.
 
 Students can ask questions in English or Roman Urdu/Hinglish. Answers are grounded in retrieved source material and include source references so students can trace the information.
 
