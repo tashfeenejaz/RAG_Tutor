@@ -314,6 +314,3 @@ Pak_Edu_RAG/
 - “Important questions” are based only on repetition in the past papers present in the dataset; they are not exam predictions.
 - The evaluation sets are relatively small. Results should be treated as evidence about this dataset, not as a guarantee of performance on every board, subject, or question style.
 
-## Data and copyright
-
-The OCR text and chunks are derived from Punjab Textbook Board material and Lahore Board past papers. Confirm that redistribution is permitted before publishing or redistributing the repository or its data. Review `.gitignore` and the source-material permissions before making the dataset public.
